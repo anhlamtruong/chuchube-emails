@@ -28,7 +28,7 @@ def send_email(
     recipient_email: str,
     subject: str,
     body: str,
-    attachment_paths: list[str] | None = None,
+    attachment_paths: list | None = None,
     inline_image_path: str | None = None,
 ) -> bool:
     """Sends a single email using the active server connection."""
@@ -48,25 +48,52 @@ def send_email(
     msg.add_alternative(body, subtype="html")
 
     # 3. Attachments
-    # Each item can be a plain path string or a (path, display_name) tuple
+    # Each item can be:
+    #   - a plain path string (legacy, reads from disk)
+    #   - a (path, display_name) tuple (legacy, reads from disk)
+    #   - a (bytes, display_name, mime_type) tuple (Supabase Storage)
     if attachment_paths:
         for item in attachment_paths:
-            if isinstance(item, (list, tuple)):
-                path, display_name = item[0], item[1]
-            else:
-                path, display_name = item, os.path.basename(item) if item else None
-            if path and os.path.exists(path):
-                ctype, encoding = mimetypes.guess_type(display_name or path)
-                if ctype is None or encoding is not None:
-                    ctype = "application/octet-stream"
+            if isinstance(item, (list, tuple)) and len(item) == 3 and isinstance(item[0], bytes):
+                # Supabase Storage: (bytes, display_name, mime_type)
+                file_bytes, display_name, content_type = item
+                ctype = content_type or "application/octet-stream"
                 maintype, subtype = ctype.split("/", 1)
-                with open(path, "rb") as f:
-                    msg.add_attachment(
-                        f.read(),
-                        maintype=maintype,
-                        subtype=subtype,
-                        filename=display_name or os.path.basename(path),
-                    )
+                msg.add_attachment(
+                    file_bytes,
+                    maintype=maintype,
+                    subtype=subtype,
+                    filename=display_name,
+                )
+            elif isinstance(item, (list, tuple)):
+                path, display_name = item[0], item[1]
+                if path and os.path.exists(path):
+                    ctype, encoding = mimetypes.guess_type(display_name or path)
+                    if ctype is None or encoding is not None:
+                        ctype = "application/octet-stream"
+                    maintype, subtype = ctype.split("/", 1)
+                    with open(path, "rb") as f:
+                        msg.add_attachment(
+                            f.read(),
+                            maintype=maintype,
+                            subtype=subtype,
+                            filename=display_name or os.path.basename(path),
+                        )
+            else:
+                path = item
+                display_name = os.path.basename(path) if path else None
+                if path and os.path.exists(path):
+                    ctype, encoding = mimetypes.guess_type(display_name or path)
+                    if ctype is None or encoding is not None:
+                        ctype = "application/octet-stream"
+                    maintype, subtype = ctype.split("/", 1)
+                    with open(path, "rb") as f:
+                        msg.add_attachment(
+                            f.read(),
+                            maintype=maintype,
+                            subtype=subtype,
+                            filename=display_name or os.path.basename(path),
+                        )
 
     server.send_message(msg)
     return True

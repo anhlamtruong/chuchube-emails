@@ -18,8 +18,8 @@ COPY backend/alembic.ini .
 COPY sending_email/templates ./sending_email/templates
 COPY sending_email/assets ./sending_email/assets
 
-# Create data directory for SQLite and uploads
-RUN mkdir -p /app/data /app/data/uploads
+# Create data directory
+RUN mkdir -p /app/data
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

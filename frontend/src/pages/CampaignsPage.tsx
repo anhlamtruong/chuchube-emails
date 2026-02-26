@@ -79,11 +79,11 @@ export default function CampaignsPage() {
   // Generate modal state
   const [genRecruiterIds, setGenRecruiterIds] = useState<string[]>([]);
   const [genSender, setGenSender] = useState("");
-  const [genTemplate, setGenTemplate] = useState("");
+  const [genTemplate, setGenTemplate] = useState("template_recruiter_ceo");
 
   // Paste modal state
   const [pasteSender, setPasteSender] = useState("");
-  const [pasteTemplate, setPasteTemplate] = useState("");
+  const [pasteTemplate, setPasteTemplate] = useState("template_recruiter_ceo");
   const [pastePosition, setPastePosition] = useState("");
   const [defaultPosition, setDefaultPosition] = useState("");
 
@@ -428,7 +428,7 @@ export default function CampaignsPage() {
       setShowGenerate(false);
       setGenRecruiterIds([]);
       setGenSender("");
-      setGenTemplate("");
+      setGenTemplate("template_recruiter_ceo");
       load();
     } catch {
       toast.error("Generation failed");
@@ -462,7 +462,7 @@ export default function CampaignsPage() {
       setShowPastePicker(false);
       setPendingPasteRows([]);
       setPasteSender("");
-      setPasteTemplate("");
+      setPasteTemplate("template_recruiter_ceo");
       setPastePosition("");
       load();
     } catch {

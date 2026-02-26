@@ -16,13 +16,10 @@ ASSETS_DIR = next((p for p in _assets_candidates if p.is_dir()), BASE_DIR / "ass
 SELFIE_DIR = ASSETS_DIR / "selfie"
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data.db'}")
 
-# --- Uploads ---
-UPLOADS_DIR = os.getenv("UPLOADS_DIR", str(Path(os.getenv("DATABASE_URL", "")).parent if os.getenv("DATABASE_URL") else BASE_DIR / "data" / "uploads"))
-if UPLOADS_DIR.startswith("sqlite"):
-    UPLOADS_DIR = str(BASE_DIR / "data" / "uploads")
-# Docker default
-if os.path.isdir("/app/data"):
-    UPLOADS_DIR = "/app/data/uploads"
+# --- Supabase Storage ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "documents")
 
 # --- Sender Info ---
 YOUR_NAME = os.getenv("YOUR_NAME", "")

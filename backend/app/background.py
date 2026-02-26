@@ -110,24 +110,25 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
                 errors.append(f"Row {row.id}: template '{row.template_file}' not found")
                 continue
 
-            # Gather attachments
-            files_to_send: list[tuple[str, str]] = []
-            global_docs = db.query(Document).filter(Document.scope == "global").all()
-            for doc in global_docs:
-                if os.path.exists(doc.file_path):
-                    files_to_send.append((doc.file_path, doc.original_name))
+            # Gather attachments from Supabase Storage
+            from app.services.storage import download_file as sb_download
+            files_to_send: list[tuple] = []  # (bytes, original_name, mime_type)
+            all_docs = []
+            global_docs = db.query(Document).filter(Document.scope == "global", Document.user_id == row.user_id).all()
             sender_docs = db.query(Document).filter(
-                Document.scope == "sender", Document.scope_ref == current_sender
+                Document.scope == "sender", Document.scope_ref == current_sender, Document.user_id == row.user_id
             ).all()
-            for doc in sender_docs:
-                if os.path.exists(doc.file_path):
-                    files_to_send.insert(0, (doc.file_path, doc.original_name))
             row_docs = db.query(Document).filter(
                 Document.scope == "campaign_row", Document.scope_ref == str(row.id)
             ).all()
-            for doc in row_docs:
-                if os.path.exists(doc.file_path):
-                    files_to_send.append((doc.file_path, doc.original_name))
+            # sender docs first, then global, then row-specific
+            all_docs = sender_docs + global_docs + row_docs
+            for doc in all_docs:
+                try:
+                    data = sb_download(doc.file_path)
+                    files_to_send.append((data, doc.original_name, doc.mime_type))
+                except Exception as e:
+                    logger.warning(f"Could not download attachment {doc.file_path}: {e}")
 
             # Personalize template
             try:

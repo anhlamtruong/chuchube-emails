@@ -16,8 +16,10 @@ export default function TermsPage() {
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             By accessing and using this email outreach platform ("Service"), you
-            agree to be bound by these Terms of Service. If you do not agree
-            with any part of these terms, you must not use the Service.
+            agree to be bound by these Terms of Service ("Terms"). If you do not
+            agree with any part of these Terms, you must not use the Service.
+            Your continued use of the Service after any changes to these Terms
+            constitutes your acceptance of the revised Terms.
           </p>
         </CardContent>
       </Card>
@@ -29,9 +31,10 @@ export default function TermsPage() {
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             The Service provides tools for managing recruiter contacts,
-            composing personalized email campaigns, and scheduling outreach
-            emails on your behalf. The Service is intended solely for
-            professional networking and career-related correspondence.
+            composing personalized email campaigns, scheduling outreach emails
+            on your behalf, and managing email sender accounts with encrypted
+            credential storage. The Service is intended solely for professional
+            networking and career-related correspondence.
           </p>
         </CardContent>
       </Card>
@@ -60,66 +63,128 @@ export default function TermsPage() {
               legitimately yours and that you are authorized to send from those
               accounts.
             </li>
+            <li>
+              You must use strong, unique app passwords or API keys when
+              configuring sender accounts and must not reuse your primary email
+              password.
+            </li>
+            <li>
+              You are responsible for reviewing and verifying the accuracy of
+              recipient data before initiating email campaigns.
+            </li>
           </ul>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">4. Account & Authentication</CardTitle>
+          <CardTitle className="text-lg">4. Account &amp; Authentication</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
-            Access to the Service is controlled via Clerk authentication. You
-            are responsible for maintaining the security of your account
-            credentials. Any activity under your account is your responsibility.
+            Access to the Service is controlled via Clerk authentication with
+            JWT-based session tokens. You are responsible for maintaining the
+            security of your account credentials and must immediately notify us
+            of any unauthorized access. Any activity performed under your
+            account is your responsibility. Each user has isolated,
+            individually-scoped settings and data that are not shared with other
+            users.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">5. Limitation of Liability</CardTitle>
+          <CardTitle className="text-lg">5. Credential Storage &amp; Security</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
-            The Service is provided "as is" without warranties of any kind. We
-            are not liable for any damages arising from your use of the Service,
-            including but not limited to email delivery failures, data loss, or
-            reputational harm resulting from emails you send.
+            Email sender credentials (SMTP passwords, Resend API keys) are
+            stored securely using Supabase Vault, which provides server-side
+            encryption at rest. Credentials are never stored in plaintext,
+            transmitted to the frontend, or logged. You may delete your stored
+            credentials at any time via the Settings page. We cannot recover
+            your original credentials once stored — you must re-enter them if
+            needed.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">6. Termination</CardTitle>
+          <CardTitle className="text-lg">6. Acceptable Use</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <ul className="list-disc pl-5 space-y-2">
+            <li>
+              You must not attempt to access another user's data, settings, or
+              credentials.
+            </li>
+            <li>
+              You must not circumvent authentication, authorization, or rate
+              limiting mechanisms.
+            </li>
+            <li>
+              You must not use the Service to transmit malicious content,
+              phishing attempts, or malware.
+            </li>
+            <li>
+              You must not use automated tools to scrape, overload, or abuse
+              the Service beyond its intended functionality.
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">7. Limitation of Liability</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <p>
+            The Service is provided "as is" without warranties of any kind,
+            express or implied. We are not liable for any damages arising from
+            your use of the Service, including but not limited to email delivery
+            failures, data loss, credential compromise due to your actions, or
+            reputational harm resulting from emails you send. We are not
+            responsible for the security practices of third-party email
+            providers (Gmail, Resend, etc.) you connect to the Service.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">8. Termination</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             We reserve the right to suspend or terminate your access to the
             Service at any time, with or without cause, and with or without
-            notice.
+            notice. Upon termination, your stored credentials will be purged
+            from Supabase Vault. You may request a full data export before
+            account termination.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">7. Changes to Terms</CardTitle>
+          <CardTitle className="text-lg">9. Changes to Terms</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             We may update these Terms from time to time. When we do, the version
             number will be incremented and you will be asked to re-accept the
-            updated terms before continuing to send emails. Continued use of the
-            Service after changes constitutes acceptance.
+            updated Terms via the Consent Settings page before continuing to
+            send emails. Your continued use of the Service after changes
+            constitutes acceptance.
           </p>
         </CardContent>
       </Card>
 
       <p className="text-xs text-muted-foreground text-center pb-4">
-        Version 1.0 &middot; Last updated {new Date().toLocaleDateString()}
+        Version 2.0 &middot; Last updated February 26, 2026
       </p>
     </div>
   );

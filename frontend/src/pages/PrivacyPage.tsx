@@ -17,20 +17,30 @@ export default function PrivacyPage() {
           <p>When you use this Service, we may collect:</p>
           <ul className="list-disc pl-5 space-y-2">
             <li>
-              <strong>Account information</strong> — your Clerk user ID and
-              authentication metadata.
+              <strong>Account information</strong> — your Clerk user ID,
+              authentication metadata, and session tokens.
             </li>
             <li>
               <strong>Recruiter contact data</strong> — names, email addresses,
-              companies, and other professional details you import or enter.
+              companies, titles, and other professional details you import or
+              enter.
             </li>
             <li>
               <strong>Email content</strong> — templates, subject lines, and
               message bodies you create.
             </li>
             <li>
+              <strong>Sender credentials</strong> — SMTP passwords and Resend
+              API keys you provide, stored encrypted via Supabase Vault (never
+              in plaintext).
+            </li>
+            <li>
               <strong>Usage data</strong> — send timestamps, scheduling
               preferences, IP addresses (for consent audit), and job results.
+            </li>
+            <li>
+              <strong>Settings &amp; preferences</strong> — per-user campaign
+              defaults, personal info, and SMTP configuration.
             </li>
           </ul>
         </CardContent>
@@ -51,21 +61,45 @@ export default function PrivacyPage() {
               activity.
             </li>
             <li>To improve the Service and troubleshoot issues.</li>
+            <li>
+              To enforce per-user data isolation so your data is never visible
+              to other users.
+            </li>
           </ul>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">3. Data Storage & Security</CardTitle>
+          <CardTitle className="text-lg">3. Data Storage &amp; Security</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
-          <p>
-            Your data is stored in a PostgreSQL database hosted on Supabase.
-            Communication between the frontend and backend is encrypted via
-            HTTPS. Email credentials are stored as environment variables on the
-            server and are never persisted in the database.
-          </p>
+          <p>Your data is protected by multiple layers of security:</p>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>
+              <strong>Database</strong> — PostgreSQL hosted on Supabase with
+              TLS-encrypted connections and Row-Level Security (RLS) policies.
+            </li>
+            <li>
+              <strong>Credential encryption</strong> — Email passwords and API
+              keys are encrypted at rest using Supabase Vault (AES-256-GCM).
+              They are decrypted server-side only at the moment of sending and
+              are never returned to the frontend.
+            </li>
+            <li>
+              <strong>Authentication</strong> — Clerk JWT tokens with JWKS
+              verification on every API request.
+            </li>
+            <li>
+              <strong>Transport</strong> — All traffic between client and server
+              is encrypted via HTTPS/TLS.
+            </li>
+            <li>
+              <strong>User isolation</strong> — Settings, sender accounts,
+              campaigns, and documents are scoped to your user ID. No
+              cross-user data access is possible through the API.
+            </li>
+          </ul>
         </CardContent>
       </Card>
 
@@ -76,28 +110,35 @@ export default function PrivacyPage() {
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             We do not sell, rent, or share your personal data or recruiter
-            contact information with third parties. Data may only be disclosed
-            if required by law.
+            contact information with third parties. Your email credentials are
+            only used to authenticate with the SMTP server or Resend API you
+            configure. Data may only be disclosed if required by law or a valid
+            court order.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">5. Your Rights</CardTitle>
+          <CardTitle className="text-lg">5. Data Retention &amp; Deletion</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <ul className="list-disc pl-5 space-y-2">
             <li>
-              You may export or delete your data at any time via the
-              Import/Export features.
+              Email send logs and job results are retained for your auditing
+              purposes and can be deleted at any time.
             </li>
             <li>
-              You may revoke consent and stop using the Service at any time.
+              Consent records are retained as an immutable audit trail for
+              compliance purposes.
             </li>
             <li>
-              If you have questions about your data, contact the system
-              administrator.
+              You may delete your sender accounts — this removes credentials
+              from Supabase Vault permanently and irreversibly.
+            </li>
+            <li>
+              You may request a complete account data deletion by contacting the
+              system administrator.
             </li>
           </ul>
         </CardContent>
@@ -105,31 +146,113 @@ export default function PrivacyPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">6. Cookies & Tracking</CardTitle>
+          <CardTitle className="text-lg">6. Your Rights</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <ul className="list-disc pl-5 space-y-2">
+            <li>
+              <strong>Access</strong> — You may export your data at any time via
+              the Import/Export features.
+            </li>
+            <li>
+              <strong>Rectification</strong> — You may update or correct any of
+              your stored data through the UI.
+            </li>
+            <li>
+              <strong>Deletion</strong> — You may delete your campaigns,
+              recruiters, sender accounts, and documents at any time.
+            </li>
+            <li>
+              <strong>Portability</strong> — You may export all data to
+              Excel/CSV format.
+            </li>
+            <li>
+              <strong>Revocation</strong> — You may revoke consent and stop
+              using the Service at any time.
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">7. Cookies &amp; Tracking</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             This Service uses Clerk for authentication, which may set session
-            cookies. We do not use any third-party analytics or tracking tools.
+            cookies. We do not use any third-party analytics, tracking tools,
+            advertising pixels, or fingerprinting technologies.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">7. Changes to This Policy</CardTitle>
+          <CardTitle className="text-lg">8. Third-Party Services</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <p>The Service integrates with the following third-party providers:</p>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>
+              <strong>Clerk</strong> — Authentication &amp; identity management.
+              Subject to{" "}
+              <a
+                href="https://clerk.com/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Clerk's Privacy Policy
+              </a>
+              .
+            </li>
+            <li>
+              <strong>Supabase</strong> — Database hosting &amp; Vault
+              encryption. Subject to{" "}
+              <a
+                href="https://supabase.com/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Supabase's Privacy Policy
+              </a>
+              .
+            </li>
+            <li>
+              <strong>Resend</strong> (optional) — Email delivery API. Subject
+              to{" "}
+              <a
+                href="https://resend.com/legal/privacy-policy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Resend's Privacy Policy
+              </a>
+              .
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">9. Changes to This Policy</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
             We may update this Privacy Policy from time to time. If we make
             material changes, the version number will be updated and you will be
-            asked to re-accept the policy before continuing to send emails.
+            asked to re-accept the policy via the Consent Settings page before
+            continuing to send emails.
           </p>
         </CardContent>
       </Card>
 
       <p className="text-xs text-muted-foreground text-center pb-4">
-        Version 1.0 &middot; Last updated {new Date().toLocaleDateString()}
+        Version 2.0 &middot; Last updated February 26, 2026
       </p>
     </div>
   );

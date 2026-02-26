@@ -145,7 +145,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               to="/consent"
               className="hover:text-foreground hover:underline transition-colors"
             >
-              Consent Settings
+              Consent &amp; Security
             </Link>
           </div>
         </footer>

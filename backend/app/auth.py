@@ -4,7 +4,7 @@ import jwt
 import requests
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.config import CLERK_JWKS_URL
+from app.config import CLERK_JWKS_URL, SESSION_TIMEOUT_SECONDS
 from app.logging_config import get_logger
 
 logger = get_logger("auth")
@@ -59,6 +59,10 @@ def verify_clerk_token(token: str) -> dict:
             algorithms=["RS256"],
             options={"verify_aud": False},  # Clerk tokens don't always include aud
         )
+        # Session timeout: reject tokens issued more than SESSION_TIMEOUT_SECONDS ago
+        iat = payload.get("iat")
+        if iat and (time.time() - iat) > SESSION_TIMEOUT_SECONDS:
+            raise HTTPException(401, "Session expired — please sign in again")
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token has expired")

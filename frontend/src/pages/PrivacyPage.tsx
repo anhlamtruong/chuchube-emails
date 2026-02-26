@@ -57,13 +57,16 @@ export default function PrivacyPage() {
               To send emails on your behalf using credentials you provide.
             </li>
             <li>
-              To maintain an audit trail of your consent and email-sending
-              activity.
+              To maintain an audit trail of your consent, credential access,
+              and email-sending activity for security and compliance.
             </li>
             <li>To improve the Service and troubleshoot issues.</li>
             <li>
               To enforce per-user data isolation so your data is never visible
               to other users.
+            </li>
+            <li>
+              To enforce rate limits and prevent abuse of the Service.
             </li>
           </ul>
         </CardContent>
@@ -78,7 +81,8 @@ export default function PrivacyPage() {
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong>Database</strong> — PostgreSQL hosted on Supabase with
-              TLS-encrypted connections and Row-Level Security (RLS) policies.
+              TLS-encrypted connections and Row-Level Security (RLS) policies
+              on all user-scoped tables.
             </li>
             <li>
               <strong>Credential encryption</strong> — Email passwords and API
@@ -88,7 +92,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>Authentication</strong> — Clerk JWT tokens with JWKS
-              verification on every API request.
+              verification on every API request, with configurable session
+              timeout (default 24 hours).
             </li>
             <li>
               <strong>Transport</strong> — All traffic between client and server
@@ -98,6 +103,17 @@ export default function PrivacyPage() {
               <strong>User isolation</strong> — Settings, sender accounts,
               campaigns, and documents are scoped to your user ID. No
               cross-user data access is possible through the API.
+            </li>
+            <li>
+              <strong>Audit logging</strong> — All credential access, email
+              sends, and account management operations are recorded in an
+              immutable audit trail with timestamps, IP addresses, and user
+              agents.
+            </li>
+            <li>
+              <strong>Rate limiting</strong> — API requests are rate-limited
+              per user (200/minute default) to prevent abuse and protect
+              service availability.
             </li>
           </ul>
         </CardContent>
@@ -131,6 +147,11 @@ export default function PrivacyPage() {
             <li>
               Consent records are retained as an immutable audit trail for
               compliance purposes.
+            </li>
+            <li>
+              Security audit logs (credential access, email sends, account
+              changes) are retained for security and compliance investigation
+              purposes and cannot be modified or deleted by users.
             </li>
             <li>
               You may delete your sender accounts — this removes credentials
@@ -252,7 +273,7 @@ export default function PrivacyPage() {
       </Card>
 
       <p className="text-xs text-muted-foreground text-center pb-4">
-        Version 2.0 &middot; Last updated February 26, 2026
+        Version 3.0 &middot; Last updated February 26, 2026
       </p>
     </div>
   );

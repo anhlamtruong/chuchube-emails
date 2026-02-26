@@ -41,3 +41,6 @@ CLERK_JWKS_URL = os.getenv(
 
 # --- CORS ---
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# --- Session ---
+SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "86400"))  # 24 hours

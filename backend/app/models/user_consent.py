@@ -9,10 +9,11 @@ from app.database import Base
 
 # Bump these when policies change to re-prompt users
 CURRENT_CONSENT_VERSIONS = {
-    "terms_of_service": "2.0",
-    "privacy_policy": "2.0",
-    "send_on_behalf": "2.0",
-    "data_security": "1.0",
+    "terms_of_service": "3.0",
+    "privacy_policy": "3.0",
+    "send_on_behalf": "3.0",
+    "data_security": "2.0",
+    "audit_monitoring": "1.0",
 }
 
 REQUIRED_CONSENT_TYPES = list(CURRENT_CONSENT_VERSIONS.keys())

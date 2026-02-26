@@ -13,3 +13,4 @@ cryptography
 requests
 supabase
 resend
+slowapi

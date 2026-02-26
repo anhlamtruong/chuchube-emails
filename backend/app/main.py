@@ -6,10 +6,13 @@ from fastapi import FastAPI, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app import config
 from app.database import init_db, get_db, SessionLocal
-from app.auth import require_auth
+from app.auth import require_auth, get_user_id
 from app.logging_config import setup_logging, get_logger
 from app.models.template import Template
 from app.models.recruiter import Recruiter
@@ -19,9 +22,28 @@ from app.models.setting import Setting
 from app.models.user_consent import UserConsent  # noqa: F401 – register model
 from app.models.referral import Referral  # noqa: F401 – register model
 from app.models.sender_account import SenderAccount  # noqa: F401 – register model
+from app.models.audit_log import AuditLog  # noqa: F401 – register model
 
-from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts
+from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs
 from app.background import start_scheduler, stop_scheduler
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Use authenticated user_id as rate-limit key, fallback to IP."""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from app.auth import verify_clerk_token
+            payload = verify_clerk_token(auth_header.split(" ", 1)[1])
+            uid = payload.get("sub")
+            if uid:
+                return uid
+        except Exception:
+            pass
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key, default_limits=["200/minute"])
 
 
 def seed_templates():
@@ -90,6 +112,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS for frontend dev server
 app.add_middleware(
     CORSMiddleware,
@@ -118,6 +144,7 @@ app.include_router(documents.router, dependencies=[Depends(require_auth)])
 app.include_router(settings.router, dependencies=[Depends(require_auth)])
 app.include_router(consent.router, dependencies=[Depends(require_auth)])
 app.include_router(sender_accounts.router, dependencies=[Depends(require_auth)])
+app.include_router(audit_logs.router, dependencies=[Depends(require_auth)])
 
 
 # --- Health check ---

@@ -17,6 +17,7 @@ from app.models.sender_account import SenderAccount
 from app.services import email_sender, template_handler
 from app.services.settings_service import get_personal_info, get_smtp_settings
 from app.services.vault import get_secret
+from app.services.audit_service import log_audit_bg
 from app import config
 from app.logging_config import get_logger
 
@@ -103,6 +104,15 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
                     current_sender = None
                     current_account = None
                     continue
+
+                # Audit: credential accessed for email sending
+                log_audit_bg(
+                    user_id=row.user_id or "",
+                    event_type="credential.accessed",
+                    resource_type="vault_secret",
+                    resource_id=account.vault_secret_name,
+                    detail={"purpose": "email_send", "job_id": job_result_id},
+                )
 
                 current_account = account
 
@@ -223,6 +233,16 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
                 jr.sent = sent
                 db.commit()
                 logger.info(f"Job {job_result_id}: sent to {row.recipient_email} (row {row.id})")
+
+                # Audit: email sent
+                log_audit_bg(
+                    user_id=row.user_id or "",
+                    event_type="email.sent",
+                    resource_type="email_column",
+                    resource_id=str(row.id),
+                    detail={"recipient": row.recipient_email, "job_id": job_result_id},
+                )
+
                 time.sleep(sleep_seconds)
             except Exception as e:
                 row.sent_status = "failed"
@@ -232,6 +252,15 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
                 db.commit()
                 errors.append(f"Row {row.id}: send failed: {e}")
                 logger.error(f"Job {job_result_id}: failed row {row.id}: {e}")
+
+                # Audit: email failed
+                log_audit_bg(
+                    user_id=row.user_id or "",
+                    event_type="email.failed",
+                    resource_type="email_column",
+                    resource_id=str(row.id),
+                    detail={"recipient": row.recipient_email, "job_id": job_result_id, "error": str(e)},
+                )
 
         if server:
             try:

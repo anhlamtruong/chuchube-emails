@@ -1,14 +1,17 @@
 """Router for user-managed sender email accounts (SMTP + Resend)."""
 import smtplib
 import ssl
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.auth import require_auth, get_user_id
 from app.models.sender_account import SenderAccount
 from app.schemas.sender_account import SenderAccountCreate, SenderAccountUpdate, SenderAccountOut
 from app.services.vault import store_secret, get_secret, update_secret, delete_secret
+from app.services.audit_service import log_audit
 from app.logging_config import get_logger
 
 logger = get_logger("sender_accounts")
@@ -35,11 +38,14 @@ def list_sender_accounts(
 @router.post("/", response_model=SenderAccountOut, status_code=201)
 def create_sender_account(
     data: SenderAccountCreate,
+    request: Request,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """Create a new sender account and store credential in Supabase Vault."""
     uid = get_user_id(auth)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
 
     if data.provider not in ("smtp", "resend"):
         raise HTTPException(400, "provider must be 'smtp' or 'resend'")
@@ -70,7 +76,23 @@ def create_sender_account(
     # Store credential in Vault
     secret_name = f"sender_{uid}_{account.id}"
     account.vault_secret_name = secret_name
-    store_secret(db, secret_name, data.credential, description=f"Credential for {data.email} ({data.provider})")
+    store_secret(
+        db, secret_name, data.credential,
+        description=f"Credential for {data.email} ({data.provider})",
+        user_id=uid, ip_address=ip, user_agent=ua,
+    )
+
+    # Audit: sender account created
+    log_audit(
+        db,
+        user_id=uid,
+        event_type="sender_account.created",
+        resource_type="sender_account",
+        resource_id=str(account.id),
+        detail={"email": data.email, "provider": data.provider},
+        ip_address=ip,
+        user_agent=ua,
+    )
 
     db.commit()
     db.refresh(account)
@@ -82,11 +104,14 @@ def create_sender_account(
 def update_sender_account(
     account_id: str,
     data: SenderAccountUpdate,
+    request: Request,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """Update a sender account. Optionally update the stored credential."""
     uid = get_user_id(auth)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
     account = db.query(SenderAccount).filter(
         SenderAccount.id == account_id, SenderAccount.user_id == uid
     ).first()
@@ -109,7 +134,19 @@ def update_sender_account(
 
     # Update credential in Vault if provided
     if data.credential:
-        update_secret(db, account.vault_secret_name, data.credential)
+        update_secret(db, account.vault_secret_name, data.credential, user_id=uid, ip_address=ip, user_agent=ua)
+
+    # Audit: sender account updated
+    log_audit(
+        db,
+        user_id=uid,
+        event_type="sender_account.updated",
+        resource_type="sender_account",
+        resource_id=account_id,
+        detail={"email": account.email, "credential_changed": bool(data.credential)},
+        ip_address=ip,
+        user_agent=ua,
+    )
 
     db.commit()
     db.refresh(account)
@@ -120,11 +157,14 @@ def update_sender_account(
 @router.delete("/{account_id}")
 def delete_sender_account(
     account_id: str,
+    request: Request,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """Delete a sender account and its Vault secret."""
     uid = get_user_id(auth)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
     account = db.query(SenderAccount).filter(
         SenderAccount.id == account_id, SenderAccount.user_id == uid
     ).first()
@@ -133,9 +173,21 @@ def delete_sender_account(
 
     # Delete from Vault first
     try:
-        delete_secret(db, account.vault_secret_name)
+        delete_secret(db, account.vault_secret_name, user_id=uid, ip_address=ip, user_agent=ua)
     except Exception as e:
         logger.warning(f"Could not delete vault secret {account.vault_secret_name}: {e}")
+
+    # Audit: sender account deleted
+    log_audit(
+        db,
+        user_id=uid,
+        event_type="sender_account.deleted",
+        resource_type="sender_account",
+        resource_id=account_id,
+        detail={"email": account.email},
+        ip_address=ip,
+        user_agent=ua,
+    )
 
     db.delete(account)
     db.commit()
@@ -146,18 +198,21 @@ def delete_sender_account(
 @router.post("/{account_id}/test")
 def test_sender_account(
     account_id: str,
+    request: Request,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """Test an SMTP connection or Resend API key validity."""
     uid = get_user_id(auth)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
     account = db.query(SenderAccount).filter(
         SenderAccount.id == account_id, SenderAccount.user_id == uid
     ).first()
     if not account:
         raise HTTPException(404, "Sender account not found")
 
-    credential = get_secret(db, account.vault_secret_name)
+    credential = get_secret(db, account.vault_secret_name, user_id=uid, ip_address=ip, user_agent=ua)
     if not credential:
         raise HTTPException(400, "No credential found in Vault — try re-saving the account")
 

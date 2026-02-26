@@ -102,17 +102,71 @@ export default function TermsPage() {
             Email sender credentials (SMTP passwords, Resend API keys) are
             stored securely using Supabase Vault, which provides server-side
             encryption at rest. Credentials are never stored in plaintext,
-            transmitted to the frontend, or logged. You may delete your stored
-            credentials at any time via the Settings page. We cannot recover
-            your original credentials once stored — you must re-enter them if
-            needed.
+            transmitted to the frontend, or logged. All credential access
+            (creation, retrieval for sending, updates, and deletion) is recorded
+            in an immutable audit log. You may delete your stored credentials at
+            any time via the Settings page. We cannot recover your original
+            credentials once stored — you must re-enter them if needed.
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">6. Acceptable Use</CardTitle>
+          <CardTitle className="text-lg">6. Audit Logging &amp; Monitoring</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <p>
+            The Service maintains an immutable, append-only audit log of
+            security-relevant events, including:
+          </p>
+          <ul className="list-disc pl-5 space-y-2">
+            <li>Credential access, creation, modification, and deletion.</li>
+            <li>Email send successes and failures.</li>
+            <li>Sender account management operations.</li>
+            <li>Session timeout and authentication events.</li>
+          </ul>
+          <p>
+            You may view your own audit logs at any time through the API.
+            Audit records include your user ID, IP address, user agent, and
+            timestamps. These logs are retained for compliance and security
+            investigation purposes.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">7. Rate Limiting</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <p>
+            To protect the Service and all users, API requests are subject to
+            rate limiting. The default limit is 200 requests per minute per
+            user. Exceeding rate limits will result in temporary throttling
+            (HTTP 429). You must not attempt to circumvent rate limits through
+            any means.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">8. Session Management</CardTitle>
+        </CardHeader>
+        <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
+          <p>
+            Sessions are managed via JWT tokens with a configurable timeout
+            period (default: 24 hours). After the timeout expires, you will be
+            required to re-authenticate. Session tokens are validated on every
+            API request using cryptographic JWKS verification.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">9. Acceptable Use</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <ul className="list-disc pl-5 space-y-2">
@@ -138,7 +192,7 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">7. Limitation of Liability</CardTitle>
+          <CardTitle className="text-lg">10. Limitation of Liability</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -155,7 +209,7 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">8. Termination</CardTitle>
+          <CardTitle className="text-lg">11. Termination</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -170,7 +224,7 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">9. Changes to Terms</CardTitle>
+          <CardTitle className="text-lg">12. Changes to Terms</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -184,7 +238,7 @@ export default function TermsPage() {
       </Card>
 
       <p className="text-xs text-muted-foreground text-center pb-4">
-        Version 2.0 &middot; Last updated February 26, 2026
+        Version 3.0 &middot; Last updated February 26, 2026
       </p>
     </div>
   );

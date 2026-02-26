@@ -26,13 +26,13 @@ const CONSENT_LABELS: Record<
   terms_of_service: {
     label: "Terms of Service",
     description:
-      "I have read and agree to the Terms of Service, including acceptable use policies, credential storage terms, and limitation of liability.",
+      "I have read and agree to the Terms of Service, including acceptable use policies, credential storage terms, rate limiting, session management, and limitation of liability.",
     link: "/terms",
   },
   privacy_policy: {
     label: "Privacy Policy",
     description:
-      "I have read and agree to the Privacy Policy, including how my data, credentials, and personal information are collected, stored, and protected.",
+      "I have read and agree to the Privacy Policy, including how my data, credentials, and personal information are collected, stored, audited, and protected.",
     link: "/privacy",
   },
   send_on_behalf: {
@@ -44,7 +44,13 @@ const CONSENT_LABELS: Record<
   data_security: {
     label: "Data Security Acknowledgment",
     description:
-      "I acknowledge that my email credentials are stored with server-side encryption (Supabase Vault), my settings are isolated per-user, and I will use strong app passwords or API keys rather than my primary email password.",
+      "I acknowledge that my email credentials are stored with server-side encryption (Supabase Vault), my settings are isolated per-user with Row-Level Security, and I will use strong app passwords or API keys rather than my primary email password.",
+    link: "",
+  },
+  audit_monitoring: {
+    label: "Audit & Monitoring",
+    description:
+      "I understand that security-relevant actions (credential access, email sends, account changes) are logged in an audit trail for security and compliance purposes. I may view my own audit logs at any time.",
     link: "",
   },
 };

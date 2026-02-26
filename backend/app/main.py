@@ -15,7 +15,7 @@ from app.models.template import Template
 from app.models.recruiter import Recruiter
 from app.models.email_column import EmailColumn
 from app.models.document import Document
-from app.models.setting import Setting, DEFAULT_SETTINGS
+from app.models.setting import Setting
 from app.models.user_consent import UserConsent  # noqa: F401 – register model
 from app.models.referral import Referral  # noqa: F401 – register model
 from app.models.sender_account import SenderAccount  # noqa: F401 – register model
@@ -69,32 +69,6 @@ def seed_templates():
         db.close()
 
 
-def seed_settings():
-    """Seed default settings on first run."""
-    db = SessionLocal()
-    try:
-        for key, (default_value, description) in DEFAULT_SETTINGS.items():
-            existing = db.query(Setting).filter(Setting.key == key).first()
-            if existing:
-                continue
-            # Override defaults with env vars where available
-            env_overrides = {
-                "your_name": config.YOUR_NAME,
-                "your_phone": config.YOUR_PHONE_NUMBER,
-                "your_city_state": config.YOUR_STATE_AND_CITY,
-                "smtp_server": config.SMTP_SERVER,
-                "smtp_port": str(config.SMTP_PORT),
-            }
-            value = env_overrides.get(key, default_value)
-            if not value:
-                value = default_value
-            s = Setting(key=key, value=value, description=description)
-            db.add(s)
-        db.commit()
-    finally:
-        db.close()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -103,7 +77,6 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Email Campaign Manager")
     init_db()
     seed_templates()
-    seed_settings()
     start_scheduler()
     logger.info("Startup complete")
     yield

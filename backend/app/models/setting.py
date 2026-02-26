@@ -1,7 +1,7 @@
-"""Application settings — persisted key-value store."""
+"""Application settings — persisted key-value store (per-user)."""
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, DateTime, func
+from sqlalchemy import String, Text, DateTime, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -9,9 +9,13 @@ from app.database import Base
 
 class Setting(Base):
     __tablename__ = "settings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_settings_user_key"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     value: Mapped[str] = mapped_column(Text, nullable=False, default="")
     description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(

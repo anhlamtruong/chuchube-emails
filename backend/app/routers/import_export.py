@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import io
 from app.database import get_db
+from app.auth import require_auth, get_user_id
 from app.services.excel_handler import import_excel, import_recruiters_from_excel, export_excel
 from app.services.clipboard_parser import parse_clipboard_text
 from app.services.settings_service import get_campaign_defaults
@@ -101,12 +102,13 @@ class ClipboardCommitRequest(BaseModel):
 
 
 @router.post("/commit-clipboard")
-def commit_clipboard(req: ClipboardCommitRequest, db: Session = Depends(get_db)):
+def commit_clipboard(req: ClipboardCommitRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """
     Commit parsed clipboard rows to the database.
     target="recruiters": only create recruiter records.
     target="both": create recruiter + campaign row for each.
     """
+    uid = get_user_id(auth)
     created = 0
     existing_count = 0
     campaigns_created = 0
@@ -142,7 +144,7 @@ def commit_clipboard(req: ClipboardCommitRequest, db: Session = Depends(get_db))
 
         # Create campaign row if requested
         if req.target == "both" and req.campaign_defaults:
-            defaults = get_campaign_defaults(db)
+            defaults = get_campaign_defaults(db, uid)
             ec = EmailColumn(
                 sender_email=req.campaign_defaults.sender_email,
                 recipient_name=record.name,

@@ -175,7 +175,7 @@ def generate_from_recruiters(req: GenerateFromRecruitersRequest, auth: dict = De
     """Create campaign rows from selected recruiter IDs."""
     uid = get_user_id(auth)
     recruiters = db.query(Recruiter).filter(Recruiter.id.in_(req.recruiter_ids)).all()
-    defaults = get_campaign_defaults(db)
+    defaults = get_campaign_defaults(db, uid)
     created = 0
     for r in recruiters:
         ec = EmailColumn(
@@ -251,7 +251,7 @@ def bulk_paste_campaigns(req: BulkPasteRequest, auth: dict = Depends(require_aut
             recruiters_created += 1
 
         # Create campaign row
-        defaults = get_campaign_defaults(db)
+        defaults = get_campaign_defaults(db, uid)
         ec = EmailColumn(
             sender_email=req.sender_email,
             recipient_name=recruiter.name,

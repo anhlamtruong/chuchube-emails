@@ -47,8 +47,10 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
         jr.total = len(rows)
         db.commit()
 
-        personal = get_personal_info(db)
-        smtp_settings = get_smtp_settings(db)
+        # Derive user_id from the first row to fetch per-user settings
+        _user_id = rows[0].user_id if rows else ""
+        personal = get_personal_info(db, _user_id)
+        smtp_settings = get_smtp_settings(db, _user_id)
         smtp_server = smtp_settings["smtp_server"]
         smtp_port = int(smtp_settings["smtp_port"])
         sleep_seconds = float(smtp_settings["sleep_between_emails"])

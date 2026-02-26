@@ -1,6 +1,6 @@
-# 📧 Email Campaign Manager
+# 📧 ChuChuBe Emails
 
-A full-stack email campaign management platform for sending personalized outreach emails at scale. Built with FastAPI, React, and PostgreSQL.
+A full-stack personalized email campaign management platform for sending outreach emails at scale. Built with FastAPI, React, and PostgreSQL.
 
 ![Stack](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![Stack](https://img.shields.io/badge/React_19-61DAFB?style=flat&logo=react&logoColor=black)
@@ -32,7 +32,7 @@ A full-stack email campaign management platform for sending personalized outreac
 
 ## Overview
 
-Email Campaign Manager is a self-hosted tool for managing recruiter outreach and email campaigns. It provides a spreadsheet-like UI for campaign management, HTML template editing with live preview, multi-sender email support, scheduled/recurring sends, document attachments, and a clipboard paste import system with fuzzy column matching.
+ChuChuBe Emails is a self-hosted tool for managing recruiter outreach and email campaigns. It provides a spreadsheet-like UI for campaign management, HTML template editing with live preview, multi-sender email support, scheduled/recurring sends, document attachments, and a clipboard paste import system with fuzzy column matching.
 
 ---
 

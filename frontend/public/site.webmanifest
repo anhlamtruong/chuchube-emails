@@ -1,0 +1,16 @@
+{
+  "name": "ChuChuBe Emails",
+  "short_name": "ChuChuBe",
+  "description": "Personalized email campaign management at scale",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e1b4b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

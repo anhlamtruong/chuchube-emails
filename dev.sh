@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start both backend and frontend for development
 
-echo "📧 Email Campaign Manager - Dev Mode"
+echo "📧 ChuChuBe Emails - Dev Mode"
 echo "======================================="
 
 # Check if .env exists

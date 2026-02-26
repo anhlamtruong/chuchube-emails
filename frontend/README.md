@@ -1,6 +1,6 @@
-# React + TypeScript + Vite
+# ChuChuBe Emails — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Built with React 19 + TypeScript + Vite + Tailwind CSS + shadcn/ui.
 
 Currently, two official plugins are available:
 

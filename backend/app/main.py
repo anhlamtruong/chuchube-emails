@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
     # Startup
     setup_logging()
     logger = get_logger("startup")
-    logger.info("Starting Email Campaign Manager")
+    logger.info("Starting ChuChuBe Emails")
     init_db()
     seed_templates()
     start_scheduler()
@@ -107,7 +107,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Email Campaign Manager",
+    title="ChuChuBe Emails",
+    description="Personalized email campaign management API",
     version="1.0.0",
     lifespan=lifespan,
 )

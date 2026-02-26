@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: email-manager-backend
+    container_name: chuchube-emails-backend
     env_file: .env
     environment:
       - FRONTEND_URL=http://localhost
@@ -19,7 +19,7 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         - VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
-    container_name: email-manager-frontend
+    container_name: chuchube-emails-frontend
     ports:
       - "80:80"
     depends_on:

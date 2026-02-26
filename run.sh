@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------
-# run.sh — Docker Compose helper for Email Campaign Manager
+# run.sh — Docker Compose helper for ChuChuBe Emails
 #
 # Usage:
 #   ./run.sh          → build + start (default)
@@ -22,7 +22,7 @@ API_URL="http://localhost:8000"
 
 print_header() {
   echo ""
-  echo "📧  Email Campaign Manager"
+  echo "📧  ChuChuBe Emails"
   echo "=================================="
 }
 

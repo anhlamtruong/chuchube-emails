@@ -16,6 +16,8 @@ import {
   Menu,
   X,
   Mail,
+  Coffee,
+  Heart,
 } from "lucide-react";
 
 const navItems = [
@@ -40,9 +42,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           <div>
             <h1 className="text-sm font-bold text-sidebar-foreground leading-none">
-              Email Campaign
+              ChuChuBe
             </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Manager</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Emails</p>
           </div>
         </div>
       </div>
@@ -67,6 +69,28 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         ))}
       </nav>
+      {/* Buy Me a Coffee */}
+      <div className="px-3 pb-2">
+        <a
+          href="https://www.buymeacoffee.com/alantruong"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/60 hover:from-amber-100 hover:to-yellow-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-400 group-hover:bg-amber-500 transition-colors shadow-sm">
+            <Coffee size={14} className="text-white" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-amber-900 leading-none">
+              Support Our Team
+            </p>
+            <p className="text-[10px] text-amber-700/70 mt-0.5 flex items-center gap-0.5">
+              Buy us a coffee <Heart size={8} className="inline fill-amber-400 text-amber-400" />
+            </p>
+          </div>
+        </a>
+      </div>
+
       <div className="p-4 border-t border-sidebar-border flex items-center gap-3">
         <UserButton
           afterSignOutUrl="/login"
@@ -117,7 +141,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             <Mail size={18} className="text-primary" />
             <span className="font-semibold text-sm">
-              Email Campaign Manager
+              ChuChuBe Emails
             </span>
           </div>
         </header>
@@ -147,6 +171,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             >
               Consent &amp; Security
             </Link>
+            <span className="hidden sm:inline">&middot;</span>
+            <a
+              href="https://www.buymeacoffee.com/alantruong"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:text-amber-600 transition-colors"
+            >
+              <Coffee size={12} className="text-amber-500" />
+              Support Us
+            </a>
           </div>
         </footer>
       </div>

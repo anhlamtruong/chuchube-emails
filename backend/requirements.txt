@@ -12,3 +12,4 @@ PyJWT
 cryptography
 requests
 supabase
+resend

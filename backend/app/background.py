@@ -13,8 +13,10 @@ from app.models.email_column import EmailColumn
 from app.models.template import Template
 from app.models.document import Document
 from app.models.job_result import JobResult
+from app.models.sender_account import SenderAccount
 from app.services import email_sender, template_handler
 from app.services.settings_service import get_personal_info, get_smtp_settings
+from app.services.vault import get_secret
 from app import config
 from app.logging_config import get_logger
 
@@ -52,6 +54,7 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
         sleep_seconds = float(smtp_settings["sleep_between_emails"])
 
         current_sender = None
+        current_account = None  # SenderAccount object
         server = None
         sent = 0
         failed = 0
@@ -69,33 +72,68 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
                 errors.append(f"Row {row.id}: no sender email")
                 continue
 
-            # Switch SMTP connection when sender changes
+            # Switch connection when sender changes
             if required_sender != current_sender:
                 if server:
                     try:
                         server.quit()
                     except Exception:
                         pass
-                password = config.EMAIL_CREDENTIALS.get(required_sender)
-                if not password:
-                    failed += 1
-                    errors.append(f"Row {row.id}: no credentials for {required_sender}")
                     server = None
-                    current_sender = None
-                    continue
-                try:
-                    server = email_sender.login_to_server(
-                        smtp_server, smtp_port, required_sender, password
-                    )
-                    current_sender = required_sender
-                except Exception as e:
+
+                # Look up sender account from DB
+                account = db.query(SenderAccount).filter(
+                    SenderAccount.email == required_sender,
+                    SenderAccount.user_id == row.user_id,
+                ).first()
+                if not account:
                     failed += 1
-                    errors.append(f"Row {row.id}: login failed: {e}")
-                    server = None
+                    errors.append(f"Row {row.id}: no sender account for {required_sender}")
                     current_sender = None
+                    current_account = None
                     continue
 
-            if server is None:
+                # Retrieve credential from Vault
+                credential = get_secret(db, account.vault_secret_name)
+                if not credential:
+                    failed += 1
+                    errors.append(f"Row {row.id}: no credential in Vault for {required_sender}")
+                    current_sender = None
+                    current_account = None
+                    continue
+
+                current_account = account
+
+                if account.provider == "smtp":
+                    smtp_host = account.smtp_host or smtp_server
+                    smtp_port_val = account.smtp_port or smtp_port
+                    try:
+                        server = email_sender.login_to_server(
+                            smtp_host, smtp_port_val, required_sender, credential
+                        )
+                        current_sender = required_sender
+                    except Exception as e:
+                        failed += 1
+                        errors.append(f"Row {row.id}: SMTP login failed: {e}")
+                        server = None
+                        current_sender = None
+                        current_account = None
+                        continue
+                elif account.provider == "resend":
+                    # Resend doesn't maintain a persistent connection; just store the key
+                    current_sender = required_sender
+                    server = None  # no SMTP server for resend
+                else:
+                    failed += 1
+                    errors.append(f"Row {row.id}: unknown provider {account.provider}")
+                    current_sender = None
+                    current_account = None
+                    continue
+
+            if current_account is None:
+                failed += 1
+                continue
+            if current_account.provider == "smtp" and server is None:
                 failed += 1
                 continue
 
@@ -156,15 +194,27 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
 
             # Send
             try:
-                email_sender.send_email(
-                    server,
-                    current_sender,
-                    row.recipient_email,
-                    subject,
-                    body,
-                    attachment_paths=files_to_send,
-                    inline_image_path=image_to_embed,
-                )
+                if current_account.provider == "smtp":
+                    email_sender.send_email(
+                        server,
+                        current_sender,
+                        row.recipient_email,
+                        subject,
+                        body,
+                        attachment_paths=files_to_send,
+                        inline_image_path=image_to_embed,
+                    )
+                elif current_account.provider == "resend":
+                    resend_key = get_secret(db, current_account.vault_secret_name)
+                    email_sender.send_email_resend(
+                        api_key=resend_key,
+                        from_email=current_sender,
+                        from_name=current_account.display_name,
+                        to_email=row.recipient_email,
+                        subject=subject,
+                        html_body=body,
+                        attachments=files_to_send,
+                    )
                 row.sent_status = "sent"
                 row.sent_at = datetime.now(tz=timezone.utc)
                 sent += 1

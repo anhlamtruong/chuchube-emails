@@ -38,24 +38,24 @@ Email Campaign Manager is a self-hosted tool for managing recruiter outreach and
 
 ## Tech Stack
 
-| Layer | Technology | Version |
-|---|---|---|
-| **Backend** | Python + FastAPI | Python 3.13 |
-| **ASGI Server** | Uvicorn | latest (`[standard]`) |
-| **ORM / Migrations** | SQLAlchemy + Alembic | latest |
-| **Database** | PostgreSQL (Supabase) / SQLite fallback | psycopg2-binary |
-| **Auth** | Clerk (JWT/JWKS RS256) | PyJWT + cryptography |
-| **Frontend** | React 19 + TypeScript 5.8 | Vite 6.3 |
-| **UI Framework** | Tailwind CSS 4.1 + shadcn/ui | — |
-| **Data Grid** | AG Grid Community | 35.1 |
-| **Code Editor** | Monaco Editor | 4.7 |
-| **HTTP Client** | Axios | 1.13 |
-| **Routing** | React Router Dom | 7.13 |
-| **Icons** | Lucide React | 0.564 |
-| **Notifications** | Sonner 2.0 + react-hot-toast 2.6 | — |
-| **Reverse Proxy** | Nginx (Alpine) | — |
-| **Containerization** | Docker Compose | 2-service |
-| **Data Processing** | Pandas + openpyxl | — |
+| Layer                | Technology                              | Version               |
+| -------------------- | --------------------------------------- | --------------------- |
+| **Backend**          | Python + FastAPI                        | Python 3.13           |
+| **ASGI Server**      | Uvicorn                                 | latest (`[standard]`) |
+| **ORM / Migrations** | SQLAlchemy + Alembic                    | latest                |
+| **Database**         | PostgreSQL (Supabase) / SQLite fallback | psycopg2-binary       |
+| **Auth**             | Clerk (JWT/JWKS RS256)                  | PyJWT + cryptography  |
+| **Frontend**         | React 19 + TypeScript 5.8               | Vite 6.3              |
+| **UI Framework**     | Tailwind CSS 4.1 + shadcn/ui            | —                     |
+| **Data Grid**        | AG Grid Community                       | 35.1                  |
+| **Code Editor**      | Monaco Editor                           | 4.7                   |
+| **HTTP Client**      | Axios                                   | 1.13                  |
+| **Routing**          | React Router Dom                        | 7.13                  |
+| **Icons**            | Lucide React                            | 0.564                 |
+| **Notifications**    | Sonner 2.0 + react-hot-toast 2.6        | —                     |
+| **Reverse Proxy**    | Nginx (Alpine)                          | —                     |
+| **Containerization** | Docker Compose                          | 2-service             |
+| **Data Processing**  | Pandas + openpyxl                       | —                     |
 
 ---
 
@@ -157,22 +157,22 @@ cd frontend && npm install && cd ..
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|---|---|---|
-| `DATABASE_URL` | Database connection string | `sqlite:///data.db` |
-| `UPLOADS_DIR` | Directory for uploaded files | `data/uploads` |
-| `YOUR_NAME` | Sender's full name (seeded into settings) | `""` |
-| `YOUR_PHONE` | Sender's phone number | `""` |
-| `YOUR_CITY_STATE` | Sender's city & state | `""` |
-| `SENDER_EMAIL_{1-9}` | Multi-sender email addresses (up to 9) | — |
-| `SENDER_PASSWORD_{1-9}` | Gmail App Passwords for each sender | — |
-| `SENDER_RESUME_{1-9}` | Resume file path per sender | — |
-| `SMTP_SERVER` | SMTP server hostname | `smtp.gmail.com` |
-| `SMTP_PORT` | SMTP server port | `465` |
-| `CLERK_SECRET_KEY` | Clerk backend secret key | `""` |
-| `CLERK_JWKS_URL` | Clerk JWKS endpoint for JWT verification | `""` |
-| `FRONTEND_URL` | Allowed CORS origin | `http://localhost:5173` |
-| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (baked into frontend at build) | — |
+| Variable                     | Description                                          | Default                 |
+| ---------------------------- | ---------------------------------------------------- | ----------------------- |
+| `DATABASE_URL`               | Database connection string                           | `sqlite:///data.db`     |
+| `UPLOADS_DIR`                | Directory for uploaded files                         | `data/uploads`          |
+| `YOUR_NAME`                  | Sender's full name (seeded into settings)            | `""`                    |
+| `YOUR_PHONE`                 | Sender's phone number                                | `""`                    |
+| `YOUR_CITY_STATE`            | Sender's city & state                                | `""`                    |
+| `SENDER_EMAIL_{1-9}`         | Multi-sender email addresses (up to 9)               | —                       |
+| `SENDER_PASSWORD_{1-9}`      | Gmail App Passwords for each sender                  | —                       |
+| `SENDER_RESUME_{1-9}`        | Resume file path per sender                          | —                       |
+| `SMTP_SERVER`                | SMTP server hostname                                 | `smtp.gmail.com`        |
+| `SMTP_PORT`                  | SMTP server port                                     | `465`                   |
+| `CLERK_SECRET_KEY`           | Clerk backend secret key                             | `""`                    |
+| `CLERK_JWKS_URL`             | Clerk JWKS endpoint for JWT verification             | `""`                    |
+| `FRONTEND_URL`               | Allowed CORS origin                                  | `http://localhost:5173` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (baked into frontend at build) | —                       |
 
 ---
 
@@ -182,66 +182,66 @@ Seven migrations managed via Alembic.
 
 ### Recruiter (`recruiters`)
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `name` | String(200) | required |
-| `email` | String(320) | unique, indexed |
-| `company` | String(200) | indexed |
-| `title` | String(200) | — |
-| `location` | String(200) | indexed |
-| `notes` | Text | — |
-| `created_at` / `updated_at` | DateTime | auto-managed |
+| Field                       | Type        | Notes           |
+| --------------------------- | ----------- | --------------- |
+| `id`                        | UUID (PK)   | auto-generated  |
+| `name`                      | String(200) | required        |
+| `email`                     | String(320) | unique, indexed |
+| `company`                   | String(200) | indexed         |
+| `title`                     | String(200) | —               |
+| `location`                  | String(200) | indexed         |
+| `notes`                     | Text        | —               |
+| `created_at` / `updated_at` | DateTime    | auto-managed    |
 
 ### EmailColumn (`email_columns`) — Campaign Rows
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `sender_email` | String(320) | — |
-| `recipient_name` / `recipient_email` | String | — |
-| `company` | String(200) | indexed |
-| `position` | String(200) | — |
-| `template_file` | String(200) | — |
-| `framework` | String(50) | `passion` / `known_for` / `mission` |
-| `my_strength` / `audience_value` | Text | — |
-| `custom_fields` | JSON | custom template placeholders |
-| `sent_status` | String(20) | `pending` / `sent` / `failed` / `response`, indexed |
-| `sent_at` / `scheduled_at` | DateTime | nullable |
-| `recruiter_id` | UUID FK → recruiters | SET NULL on delete |
-| `user_id` | String(200) | Clerk user ID, indexed |
+| Field                                | Type                 | Notes                                               |
+| ------------------------------------ | -------------------- | --------------------------------------------------- |
+| `id`                                 | UUID (PK)            | auto-generated                                      |
+| `sender_email`                       | String(320)          | —                                                   |
+| `recipient_name` / `recipient_email` | String               | —                                                   |
+| `company`                            | String(200)          | indexed                                             |
+| `position`                           | String(200)          | —                                                   |
+| `template_file`                      | String(200)          | —                                                   |
+| `framework`                          | String(50)           | `passion` / `known_for` / `mission`                 |
+| `my_strength` / `audience_value`     | Text                 | —                                                   |
+| `custom_fields`                      | JSON                 | custom template placeholders                        |
+| `sent_status`                        | String(20)           | `pending` / `sent` / `failed` / `response`, indexed |
+| `sent_at` / `scheduled_at`           | DateTime             | nullable                                            |
+| `recruiter_id`                       | UUID FK → recruiters | SET NULL on delete                                  |
+| `user_id`                            | String(200)          | Clerk user ID, indexed                              |
 
 ### Template (`templates`)
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `name` | String(200) | unique per user_id |
-| `user_id` | String(200) | nullable (null = system template) |
-| `subject_line` | Text | — |
-| `body_html` | Text | — |
+| Field          | Type        | Notes                             |
+| -------------- | ----------- | --------------------------------- |
+| `id`           | UUID (PK)   | auto-generated                    |
+| `name`         | String(200) | unique per user_id                |
+| `user_id`      | String(200) | nullable (null = system template) |
+| `subject_line` | Text        | —                                 |
+| `body_html`    | Text        | —                                 |
 
 ### Document (`documents`)
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `filename` / `original_name` | String | stored vs user-facing name |
-| `file_path` | String(1000) | absolute path on disk |
-| `mime_type` | String(200) | — |
-| `size_bytes` | Integer | — |
-| `scope` | String(20) | `global` / `sender` / `campaign_row` |
-| `scope_ref` | String(320) | sender email or row ID |
+| Field                        | Type         | Notes                                |
+| ---------------------------- | ------------ | ------------------------------------ |
+| `id`                         | UUID (PK)    | auto-generated                       |
+| `filename` / `original_name` | String       | stored vs user-facing name           |
+| `file_path`                  | String(1000) | absolute path on disk                |
+| `mime_type`                  | String(200)  | —                                    |
+| `size_bytes`                 | Integer      | —                                    |
+| `scope`                      | String(20)   | `global` / `sender` / `campaign_row` |
+| `scope_ref`                  | String(320)  | sender email or row ID               |
 
 ### JobResult (`job_results`)
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `status` | String(20) | `queued` / `scheduled` / `running` / `completed` / `error` |
-| `total` / `sent` / `failed` | Integer | counts |
-| `row_ids` | JSON | list of campaign row UUIDs |
-| `errors` | JSON | list of error strings |
+| Field                       | Type       | Notes                                                      |
+| --------------------------- | ---------- | ---------------------------------------------------------- |
+| `id`                        | UUID (PK)  | auto-generated                                             |
+| `status`                    | String(20) | `queued` / `scheduled` / `running` / `completed` / `error` |
+| `total` / `sent` / `failed` | Integer    | counts                                                     |
+| `row_ids`                   | JSON       | list of campaign row UUIDs                                 |
+| `errors`                    | JSON       | list of error strings                                      |
 
 ### Setting (`settings`)
 
@@ -249,28 +249,28 @@ Key-value store with seeded defaults: `default_position`, `default_framework`, `
 
 ### UserConsent (`user_consents`)
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | UUID (PK) | auto-generated |
-| `user_id` | String(200) | indexed |
-| `consent_type` | String(50) | `terms_of_service` / `privacy_policy` / `send_on_behalf` |
-| `version` | String(20) | current: `1.0` |
-| `accepted_at` | DateTime | — |
-| `ip_address` | String(50) | nullable |
+| Field          | Type        | Notes                                                    |
+| -------------- | ----------- | -------------------------------------------------------- |
+| `id`           | UUID (PK)   | auto-generated                                           |
+| `user_id`      | String(200) | indexed                                                  |
+| `consent_type` | String(50)  | `terms_of_service` / `privacy_policy` / `send_on_behalf` |
+| `version`      | String(20)  | current: `1.0`                                           |
+| `accepted_at`  | DateTime    | —                                                        |
+| `ip_address`   | String(50)  | nullable                                                 |
 
 Unique constraint on (`user_id`, `consent_type`, `version`).
 
 ### Migration History
 
-| # | File | Description |
-|---|---|---|
-| 001 | `001_initial.py` | Initial schema |
-| 002 | `002_add_scheduled_at.py` | Add `scheduled_at` to email_columns |
-| 003 | `003_add_job_results.py` | Add `job_results` table |
-| 004 | `004_add_user_id.py` | Add `user_id` to email_columns |
-| 005 | `005_convert_to_uuid.py` | Convert integer PKs to UUIDs |
-| 006 | `006_add_row_ids_to_job_results.py` | Add `row_ids` JSON to job_results |
-| 007 | `007_add_user_consent.py` | Add `user_consents` table |
+| #   | File                                | Description                         |
+| --- | ----------------------------------- | ----------------------------------- |
+| 001 | `001_initial.py`                    | Initial schema                      |
+| 002 | `002_add_scheduled_at.py`           | Add `scheduled_at` to email_columns |
+| 003 | `003_add_job_results.py`            | Add `job_results` table             |
+| 004 | `004_add_user_id.py`                | Add `user_id` to email_columns      |
+| 005 | `005_convert_to_uuid.py`            | Convert integer PKs to UUIDs        |
+| 006 | `006_add_row_ids_to_job_results.py` | Add `row_ids` JSON to job_results   |
+| 007 | `007_add_user_consent.py`           | Add `user_consents` table           |
 
 ---
 
@@ -280,120 +280,120 @@ All protected routes require Clerk JWT: `Authorization: Bearer <token>`.
 
 ### Health & Dashboard
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/health` | Health check (no auth) |
-| `GET` | `/api/dashboard` | Stats: counts, status breakdown, upcoming jobs |
+| Method | Path             | Description                                    |
+| ------ | ---------------- | ---------------------------------------------- |
+| `GET`  | `/api/health`    | Health check (no auth)                         |
+| `GET`  | `/api/dashboard` | Stats: counts, status breakdown, upcoming jobs |
 
 ### Recruiters — `/api/recruiters`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | List (paginated, filterable by company/location/title/search) |
-| `GET` | `/count` | Total count |
-| `GET` | `/{id}` | Get single |
-| `POST` | `/` | Create single |
-| `PUT` | `/{id}` | Update |
-| `DELETE` | `/{id}` | Delete |
-| `POST` | `/bulk` | Bulk create |
+| Method   | Path     | Description                                                   |
+| -------- | -------- | ------------------------------------------------------------- |
+| `GET`    | `/`      | List (paginated, filterable by company/location/title/search) |
+| `GET`    | `/count` | Total count                                                   |
+| `GET`    | `/{id}`  | Get single                                                    |
+| `POST`   | `/`      | Create single                                                 |
+| `PUT`    | `/{id}`  | Update                                                        |
+| `DELETE` | `/{id}`  | Delete                                                        |
+| `POST`   | `/bulk`  | Bulk create                                                   |
 
 ### Campaigns — `/api/campaigns`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/custom-columns` | Distinct custom field column names |
-| `GET` | `/` | List (paginated, filterable) |
-| `GET` | `/count` | Count for current user |
-| `POST` | `/` | Create |
-| `PUT` | `/{id}` | Update |
-| `PUT` | `/bulk/update` | Bulk update |
-| `DELETE` | `/{id}` | Delete |
-| `DELETE` | `/bulk/delete` | Bulk delete |
-| `POST` | `/generate-from-recruiters` | Auto-generate from selected recruiters |
-| `POST` | `/bulk-paste` | Bulk paste with optional position |
+| Method   | Path                        | Description                            |
+| -------- | --------------------------- | -------------------------------------- |
+| `GET`    | `/custom-columns`           | Distinct custom field column names     |
+| `GET`    | `/`                         | List (paginated, filterable)           |
+| `GET`    | `/count`                    | Count for current user                 |
+| `POST`   | `/`                         | Create                                 |
+| `PUT`    | `/{id}`                     | Update                                 |
+| `PUT`    | `/bulk/update`              | Bulk update                            |
+| `DELETE` | `/{id}`                     | Delete                                 |
+| `DELETE` | `/bulk/delete`              | Bulk delete                            |
+| `POST`   | `/generate-from-recruiters` | Auto-generate from selected recruiters |
+| `POST`   | `/bulk-paste`               | Bulk paste with optional position      |
 
 ### Templates — `/api/templates`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | List all (system + user) |
-| `GET` | `/{id}` | Get single |
-| `POST` | `/` | Create |
-| `PUT` | `/{id}` | Update |
-| `DELETE` | `/{id}` | Delete |
-| `POST` | `/{id}/preview` | Preview with sample data |
+| Method   | Path            | Description              |
+| -------- | --------------- | ------------------------ |
+| `GET`    | `/`             | List all (system + user) |
+| `GET`    | `/{id}`         | Get single               |
+| `POST`   | `/`             | Create                   |
+| `PUT`    | `/{id}`         | Update                   |
+| `DELETE` | `/{id}`         | Delete                   |
+| `POST`   | `/{id}/preview` | Preview with sample data |
 
 ### Emails — `/api/emails`
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/send` | Send immediately (background thread) |
-| `GET` | `/status/{job_id}` | Job status |
-| `GET` | `/jobs` | List all jobs (paginated) |
-| `GET` | `/senders` | List configured senders |
-| `POST` | `/schedule` | Schedule one-time send |
-| `POST` | `/schedule/recurring` | Schedule recurring sends with interval |
-| `GET` | `/scheduled-jobs` | List scheduled + finished jobs |
-| `DELETE` | `/scheduled-jobs/{job_id}` | Cancel scheduled job |
+| Method   | Path                       | Description                            |
+| -------- | -------------------------- | -------------------------------------- |
+| `POST`   | `/send`                    | Send immediately (background thread)   |
+| `GET`    | `/status/{job_id}`         | Job status                             |
+| `GET`    | `/jobs`                    | List all jobs (paginated)              |
+| `GET`    | `/senders`                 | List configured senders                |
+| `POST`   | `/schedule`                | Schedule one-time send                 |
+| `POST`   | `/schedule/recurring`      | Schedule recurring sends with interval |
+| `GET`    | `/scheduled-jobs`          | List scheduled + finished jobs         |
+| `DELETE` | `/scheduled-jobs/{job_id}` | Cancel scheduled job                   |
 
 ### Import/Export — `/api/import-export`
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/import-campaigns` | Import from Excel |
-| `POST` | `/import-recruiters` | Import single Excel file |
-| `POST` | `/import-recruiters-bulk` | Import multiple Excel files |
-| `POST` | `/parse-clipboard` | Parse clipboard CSV/TSV (fuzzy column matching) |
-| `POST` | `/commit-clipboard` | Commit parsed clipboard data |
-| `GET` | `/export-campaigns` | Export to Excel download |
+| Method | Path                      | Description                                     |
+| ------ | ------------------------- | ----------------------------------------------- |
+| `POST` | `/import-campaigns`       | Import from Excel                               |
+| `POST` | `/import-recruiters`      | Import single Excel file                        |
+| `POST` | `/import-recruiters-bulk` | Import multiple Excel files                     |
+| `POST` | `/parse-clipboard`        | Parse clipboard CSV/TSV (fuzzy column matching) |
+| `POST` | `/commit-clipboard`       | Commit parsed clipboard data                    |
+| `GET`  | `/export-campaigns`       | Export to Excel download                        |
 
 ### Documents — `/api/documents`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | List (filtered by scope & scope_ref) |
-| `POST` | `/upload` | Upload single |
-| `POST` | `/upload-multiple` | Upload multiple |
-| `GET` | `/{id}/download` | Download |
-| `DELETE` | `/{id}` | Delete |
+| Method   | Path               | Description                          |
+| -------- | ------------------ | ------------------------------------ |
+| `GET`    | `/`                | List (filtered by scope & scope_ref) |
+| `POST`   | `/upload`          | Upload single                        |
+| `POST`   | `/upload-multiple` | Upload multiple                      |
+| `GET`    | `/{id}/download`   | Download                             |
+| `DELETE` | `/{id}`            | Delete                               |
 
 ### Settings — `/api/settings`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | List all settings |
-| `GET` | `/{key}` | Get by key |
-| `PUT` | `/{key}` | Update single |
-| `PUT` | `/` | Bulk update |
+| Method | Path         | Description          |
+| ------ | ------------ | -------------------- |
+| `GET`  | `/`          | List all settings    |
+| `GET`  | `/{key}`     | Get by key           |
+| `PUT`  | `/{key}`     | Update single        |
+| `PUT`  | `/`          | Bulk update          |
 | `POST` | `/test-smtp` | Test SMTP connection |
 
 ### Consent — `/api/consent`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/status` | Current consent status |
-| `POST` | `/accept` | Accept single consent type |
+| Method | Path          | Description                  |
+| ------ | ------------- | ---------------------------- |
+| `GET`  | `/status`     | Current consent status       |
+| `POST` | `/accept`     | Accept single consent type   |
 | `POST` | `/accept-all` | Accept all required consents |
-| `GET` | `/history` | Consent acceptance history |
+| `GET`  | `/history`    | Consent acceptance history   |
 
 ---
 
 ## Frontend Pages
 
-| Route | Page | Description |
-|---|---|---|
-| `/login` | Login | Clerk sign-in; redirects when authenticated |
-| `/` | Dashboard | Overview cards (totals, status breakdown), upcoming jobs, quick actions |
-| `/recruiters` | Recruiters | CRUD table with search, filters, pagination, Excel/clipboard import, drag-and-drop |
-| `/campaigns` | Campaigns | AG Grid spreadsheet: inline editing, auto-save, bulk ops, generate from recruiters, clipboard paste, Excel import/export, custom columns, sender/template picker |
-| `/templates` | Templates | Monaco HTML editor with live preview, system vs user templates |
-| `/documents` | Documents | File management with 3 scopes, upload/download/delete, drag-and-drop, multi-file |
-| `/send` | Send | Email control center: select campaigns, send/schedule (one-time/recurring), timezone, job progress, consent gate, retry failed, reset status |
-| `/scheduled-jobs` | Scheduled Jobs | View/cancel jobs, auto-refresh (30s), expandable finished job details |
-| `/settings` | Settings | Grouped settings editor (Campaign Defaults, Personal Info, SMTP), SMTP test |
-| `/consent` | Consent | Accept ToS, Privacy Policy, send-on-behalf; consent history |
-| `/terms` | Terms of Service | Legal terms content |
-| `/privacy` | Privacy Policy | Privacy policy content |
+| Route             | Page             | Description                                                                                                                                                      |
+| ----------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/login`          | Login            | Clerk sign-in; redirects when authenticated                                                                                                                      |
+| `/`               | Dashboard        | Overview cards (totals, status breakdown), upcoming jobs, quick actions                                                                                          |
+| `/recruiters`     | Recruiters       | CRUD table with search, filters, pagination, Excel/clipboard import, drag-and-drop                                                                               |
+| `/campaigns`      | Campaigns        | AG Grid spreadsheet: inline editing, auto-save, bulk ops, generate from recruiters, clipboard paste, Excel import/export, custom columns, sender/template picker |
+| `/templates`      | Templates        | Monaco HTML editor with live preview, system vs user templates                                                                                                   |
+| `/documents`      | Documents        | File management with 3 scopes, upload/download/delete, drag-and-drop, multi-file                                                                                 |
+| `/send`           | Send             | Email control center: select campaigns, send/schedule (one-time/recurring), timezone, job progress, consent gate, retry failed, reset status                     |
+| `/scheduled-jobs` | Scheduled Jobs   | View/cancel jobs, auto-refresh (30s), expandable finished job details                                                                                            |
+| `/settings`       | Settings         | Grouped settings editor (Campaign Defaults, Personal Info, SMTP), SMTP test                                                                                      |
+| `/consent`        | Consent          | Accept ToS, Privacy Policy, send-on-behalf; consent history                                                                                                      |
+| `/terms`          | Terms of Service | Legal terms content                                                                                                                                              |
+| `/privacy`        | Privacy Policy   | Privacy policy content                                                                                                                                           |
 
 ---
 
@@ -416,18 +416,18 @@ All protected routes require Clerk JWT: `Authorization: Bearer <token>`.
 
 ### Template Placeholders
 
-| Placeholder | Source |
-|---|---|
-| `{first_name}` | Recipient's first name (from `recipient_name`) |
-| `{company}` | Company name |
-| `{position}` | Position/role |
+| Placeholder             | Source                                             |
+| ----------------------- | -------------------------------------------------- |
+| `{first_name}`          | Recipient's first name (from `recipient_name`)     |
+| `{company}`             | Company name                                       |
+| `{position}`            | Position/role                                      |
 | `{value_prop_sentence}` | Auto-generated from `framework` + `audience_value` |
-| `{your_name}` | From settings |
-| `{your_email}` | Sender email |
-| `{your_phone}` | From settings |
-| `{your_city_state}` | From settings |
-| `{my_strength}` | Custom strength pitch |
-| `{custom_*}` | Any key from `custom_fields` JSON |
+| `{your_name}`           | From settings                                      |
+| `{your_email}`          | Sender email                                       |
+| `{your_phone}`          | From settings                                      |
+| `{your_city_state}`     | From settings                                      |
+| `{my_strength}`         | Custom strength pitch                              |
+| `{custom_*}`            | Any key from `custom_fields` JSON                  |
 
 ### Value Proposition Framework
 

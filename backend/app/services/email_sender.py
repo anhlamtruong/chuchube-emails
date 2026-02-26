@@ -97,3 +97,47 @@ def send_email(
 
     server.send_message(msg)
     return True
+
+
+def send_email_resend(
+    api_key: str,
+    from_email: str,
+    from_name: str,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    attachments: list | None = None,
+) -> dict:
+    """Send an email via the Resend API.
+
+    `attachments` is a list of (bytes, display_name, mime_type) tuples.
+    Returns the Resend API response dict.
+    """
+    import resend
+    import base64
+
+    resend.api_key = api_key
+
+    from_addr = f"{from_name} <{from_email}>" if from_name else from_email
+
+    params: dict = {
+        "from": from_addr,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
+
+    if attachments:
+        resend_attachments = []
+        for item in attachments:
+            if isinstance(item, (list, tuple)) and len(item) == 3 and isinstance(item[0], bytes):
+                file_bytes, display_name, _mime = item
+                resend_attachments.append({
+                    "filename": display_name,
+                    "content": list(file_bytes),
+                })
+        if resend_attachments:
+            params["attachments"] = resend_attachments
+
+    result = resend.Emails.send(params)
+    return result

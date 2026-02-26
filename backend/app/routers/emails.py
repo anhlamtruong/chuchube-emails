@@ -10,6 +10,7 @@ from app.models.job_result import JobResult
 from app.schemas.email_column import SendEmailsRequest, ScheduleEmailsRequest, RecurringScheduleRequest
 from app.logging_config import get_logger
 from app import config
+from app.auth import require_auth, get_user_id
 from app.routers.consent import require_consent
 
 logger = get_logger("emails")
@@ -86,9 +87,31 @@ def list_jobs(
 
 
 @router.get("/senders")
-def list_senders():
-    """List configured sender email addresses."""
-    return {"senders": list(config.EMAIL_CREDENTIALS.keys())}
+def list_senders(
+    auth: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """List sender accounts for the current user."""
+    from app.auth import get_user_id
+    from app.models.sender_account import SenderAccount
+    uid = get_user_id(auth)
+    accounts = (
+        db.query(SenderAccount)
+        .filter(SenderAccount.user_id == uid)
+        .order_by(SenderAccount.is_default.desc(), SenderAccount.created_at)
+        .all()
+    )
+    return {
+        "senders": [
+            {
+                "email": a.email,
+                "display_name": a.display_name,
+                "provider": a.provider,
+                "is_default": a.is_default,
+            }
+            for a in accounts
+        ]
+    }
 
 
 # --------------------------------------------------------------------------- #

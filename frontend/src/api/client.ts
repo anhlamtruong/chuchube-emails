@@ -209,8 +209,56 @@ export const getJobStatus = (jobId: string) =>
     }>(`/emails/status/${jobId}`)
     .then((r) => r.data);
 
+export interface SenderInfo {
+  email: string;
+  display_name: string;
+  provider: string;
+  is_default: boolean;
+}
+
 export const getSenders = () =>
-  api.get<{ senders: string[] }>("/emails/senders").then((r) => r.data);
+  api.get<{ senders: SenderInfo[] }>("/emails/senders").then((r) => r.data);
+
+// --- Sender Accounts ---
+export interface SenderAccount {
+  id: string;
+  email: string;
+  display_name: string;
+  provider: string;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SenderAccountCreate {
+  email: string;
+  display_name: string;
+  provider: string;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  credential: string;
+  is_default?: boolean;
+}
+
+export const getSenderAccounts = () =>
+  api.get<SenderAccount[]>("/sender-accounts/").then((r) => r.data);
+
+export const createSenderAccount = (data: SenderAccountCreate) =>
+  api.post<SenderAccount>("/sender-accounts/", data).then((r) => r.data);
+
+export const updateSenderAccount = (id: string, data: Partial<SenderAccountCreate>) =>
+  api.put<SenderAccount>(`/sender-accounts/${id}`, data).then((r) => r.data);
+
+export const deleteSenderAccount = (id: string) =>
+  api.delete(`/sender-accounts/${id}`).then((r) => r.data);
+
+export const testSenderAccount = (id: string) =>
+  api.post<{ status: string; detail: string }>(`/sender-accounts/${id}/test`).then((r) => r.data);
+
+export const testSenderCredential = (data: SenderAccountCreate) =>
+  api.post<{ status: string; detail: string }>("/sender-accounts/test-credential", data).then((r) => r.data);
 
 // --- Scheduling ---
 export interface ScheduledJob {

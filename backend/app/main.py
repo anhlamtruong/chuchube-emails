@@ -18,8 +18,9 @@ from app.models.document import Document
 from app.models.setting import Setting, DEFAULT_SETTINGS
 from app.models.user_consent import UserConsent  # noqa: F401 – register model
 from app.models.referral import Referral  # noqa: F401 – register model
+from app.models.sender_account import SenderAccount  # noqa: F401 – register model
 
-from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent
+from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts
 from app.background import start_scheduler, stop_scheduler
 
 
@@ -143,6 +144,7 @@ app.include_router(import_export.router, dependencies=[Depends(require_auth)])
 app.include_router(documents.router, dependencies=[Depends(require_auth)])
 app.include_router(settings.router, dependencies=[Depends(require_auth)])
 app.include_router(consent.router, dependencies=[Depends(require_auth)])
+app.include_router(sender_accounts.router, dependencies=[Depends(require_auth)])
 
 
 # --- Health check ---

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSenders, getTemplates } from "@/api/client";
-import type { Template } from "@/api/client";
+import type { Template, SenderInfo } from "@/api/client";
 
 interface Props {
   senderEmail: string;
@@ -15,13 +15,27 @@ export default function SenderTemplatePicker({
   onSenderChange,
   onTemplateChange,
 }: Props) {
-  const [senders, setSenders] = useState<string[]>([]);
+  const [senders, setSenders] = useState<SenderInfo[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
 
   useEffect(() => {
     getSenders().then((r) => setSenders(r.senders));
     getTemplates().then(setTemplates);
   }, []);
+
+  const providerBadge = (provider: string) => {
+    if (provider === "resend")
+      return (
+        <span className="ml-1.5 text-[10px] font-medium bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+          Resend
+        </span>
+      );
+    return (
+      <span className="ml-1.5 text-[10px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+        SMTP
+      </span>
+    );
+  };
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -36,11 +50,26 @@ export default function SenderTemplatePicker({
         >
           <option value="">Select sender…</option>
           {senders.map((s) => (
-            <option key={s} value={s}>
-              {s}
+            <option key={s.email} value={s.email}>
+              {s.display_name ? `${s.display_name} <${s.email}>` : s.email}
+              {s.is_default ? " ★" : ""}
             </option>
           ))}
         </select>
+        {senderEmail && senders.length > 0 && (() => {
+          const selected = senders.find((s) => s.email === senderEmail);
+          if (!selected) return null;
+          return (
+            <div className="mt-1 flex items-center">
+              {providerBadge(selected.provider)}
+              {selected.is_default && (
+                <span className="ml-1 text-[10px] font-medium bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                  Default
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">

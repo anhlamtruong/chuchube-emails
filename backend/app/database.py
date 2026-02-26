@@ -4,7 +4,12 @@ from app.config import DATABASE_URL
 
 # connect_args is only needed for SQLite; detect driver from URL
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=_connect_args,
+    pool_pre_ping=True,       # test connections before checkout (fixes Supabase idle drops)
+    pool_recycle=270,          # recycle connections every 4.5 min (Supabase drops idle after ~5 min)
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

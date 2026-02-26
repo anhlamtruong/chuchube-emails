@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+python-dotenv
+pandas
+openpyxl
+python-multipart
+pydantic[email]
+psycopg2-binary
+PyJWT
+cryptography
+requests

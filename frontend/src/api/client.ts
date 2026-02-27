@@ -17,7 +17,7 @@ export function setClerkTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn;
 }
 
-// Inject Clerk bearer token on every request
+// Inject Clerk bearer token + access key on every request
 api.interceptors.request.use(async (config) => {
   if (_getToken) {
     const token = await _getToken();
@@ -25,15 +25,29 @@ api.interceptors.request.use(async (config) => {
       config.headers.Authorization = `Bearer ${token}`;
     }
   }
+  // Include access key if stored
+  const accessKey = localStorage.getItem("access_key");
+  if (accessKey) {
+    config.headers["X-Access-Key"] = accessKey;
+  }
   return config;
 });
 
-// Handle 401 — Clerk will redirect to sign-in automatically
+// Handle 401 + 403 (access key invalid)
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
       // Clerk handles the redirect; just reject so callers can show a toast
+    }
+    if (
+      err.response?.status === 403 &&
+      typeof err.response?.data?.detail === "string" &&
+      err.response.data.detail.toLowerCase().includes("access key")
+    ) {
+      // Invalid access key — clear it and reload to show gate
+      localStorage.removeItem("access_key");
+      window.location.href = "/";
     }
     return Promise.reject(err);
   },
@@ -148,20 +162,24 @@ export interface CustomColumnDefinition {
 }
 
 export const getCustomColumnDefinitions = () =>
-  api
-    .get<CustomColumnDefinition[]>("/custom-columns/")
-    .then((r) => r.data);
+  api.get<CustomColumnDefinition[]>("/custom-columns/").then((r) => r.data);
 
 export const createCustomColumnDefinition = (data: {
   name: string;
   default_value?: string;
   sort_order?: number;
-}) => api.post<CustomColumnDefinition>("/custom-columns/", data).then((r) => r.data);
+}) =>
+  api
+    .post<CustomColumnDefinition>("/custom-columns/", data)
+    .then((r) => r.data);
 
 export const updateCustomColumnDefinition = (
   id: string,
   data: { name?: string; default_value?: string; sort_order?: number },
-) => api.put<CustomColumnDefinition>(`/custom-columns/${id}`, data).then((r) => r.data);
+) =>
+  api
+    .put<CustomColumnDefinition>(`/custom-columns/${id}`, data)
+    .then((r) => r.data);
 
 export const deleteCustomColumnDefinition = (id: string) =>
   api.delete(`/custom-columns/${id}`).then((r) => r.data);
@@ -197,6 +215,7 @@ export interface Template {
   subject_line: string;
   body_html: string;
   user_id?: string | null;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -215,6 +234,9 @@ export const updateTemplate = (id: string, data: Partial<Template>) =>
 
 export const deleteTemplate = (id: string) =>
   api.delete(`/templates/${id}`).then((r) => r.data);
+
+export const setTemplateDefault = (id: string) =>
+  api.put<Template>(`/templates/${id}/set-default`).then((r) => r.data);
 
 export const previewTemplate = (id: string, data: Record<string, string>) =>
   api
@@ -261,6 +283,10 @@ export interface SenderAccount {
   smtp_host: string | null;
   smtp_port: number | null;
   is_default: boolean;
+  organization_name: string | null;
+  organization_type: string | null;
+  title: string | null;
+  city: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -273,6 +299,10 @@ export interface SenderAccountCreate {
   smtp_port?: number | null;
   credential: string;
   is_default?: boolean;
+  organization_name?: string | null;
+  organization_type?: string | null;
+  title?: string | null;
+  city?: string | null;
 }
 
 export const getSenderAccounts = () =>
@@ -427,6 +457,14 @@ export const generateFromRecruiters = (data: {
   custom_field_overrides?: Record<string, string>;
 }) => api.post("/campaigns/generate-from-recruiters", data).then((r) => r.data);
 
+export const generateFromReferrals = (data: {
+  referral_ids: string[];
+  sender_email: string;
+  template_file: string;
+  position?: string;
+  custom_field_overrides?: Record<string, string>;
+}) => api.post("/campaigns/generate-from-referrals", data).then((r) => r.data);
+
 export const bulkPasteCampaigns = (data: {
   rows: ClipboardPreviewRow[];
   sender_email: string;
@@ -564,3 +602,58 @@ export const getConsentHistory = () =>
   api
     .get<{ history: ConsentHistoryItem[] }>("/consent/history")
     .then((r) => r.data);
+
+/* ------------------------------------------------------------------ */
+/*  Access Key                                                         */
+/* ------------------------------------------------------------------ */
+
+export const validateAccessKey = (key: string) =>
+  api
+    .post<{ valid: boolean; label: string }>("/auth/validate-access-key", {
+      key,
+    })
+    .then((r) => r.data);
+
+/* ------------------------------------------------------------------ */
+/*  Admin                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface AccessKeyItem {
+  id: string;
+  key: string;
+  label: string;
+  created_at: string | null;
+  used_by_user_id: string | null;
+  used_at: string | null;
+  is_active: boolean;
+}
+
+export interface OrgAccount {
+  id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  provider: string;
+  organization_name: string | null;
+  organization_type: string | null;
+  title: string | null;
+  city: string | null;
+  created_at: string | null;
+}
+
+export const checkAdmin = () =>
+  api.get<{ is_admin: boolean }>("/admin/check").then((r) => r.data);
+
+export const listAccessKeys = () =>
+  api.get<AccessKeyItem[]>("/admin/access-keys").then((r) => r.data);
+
+export const generateAccessKey = (label: string) =>
+  api
+    .post<AccessKeyItem>("/admin/access-keys", { label })
+    .then((r) => r.data);
+
+export const revokeAccessKey = (id: string) =>
+  api.delete(`/admin/access-keys/${id}`).then((r) => r.data);
+
+export const listOrgAccounts = () =>
+  api.get<OrgAccount[]>("/admin/org-accounts").then((r) => r.data);

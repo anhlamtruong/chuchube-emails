@@ -5,6 +5,7 @@ from app.database import get_db
 from app.auth import require_auth, get_user_id
 from app.models.email_column import EmailColumn
 from app.models.recruiter import Recruiter
+from app.models.referral import Referral
 from app.models.custom_column import CustomColumnDefinition
 from app.services.settings_service import get_campaign_defaults, get_custom_column_defaults
 from app.schemas.email_column import (
@@ -206,6 +207,49 @@ def generate_from_recruiters(req: GenerateFromRecruitersRequest, auth: dict = De
             position=position,
             template_file=req.template_file,
             recruiter_id=r.id,
+            sent_status="pending",
+            framework=defaults["framework"],
+            my_strength=defaults["my_strength"],
+            audience_value=defaults["audience_value"],
+            custom_fields=custom_fields,
+            user_id=uid,
+        )
+        db.add(ec)
+        created += 1
+    db.commit()
+    return {"created": created}
+
+
+# --- Generate campaigns from referral filters ---
+
+class GenerateFromReferralsRequest(BaseModel):
+    referral_ids: list[str]
+    sender_email: str = ""
+    template_file: str = ""
+    position: str = ""
+    custom_field_overrides: dict[str, str] = {}
+
+
+@router.post("/generate-from-referrals")
+def generate_from_referrals(req: GenerateFromReferralsRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Create campaign rows from selected referral IDs."""
+    uid = get_user_id(auth)
+    referrals = db.query(Referral).filter(Referral.id.in_(req.referral_ids)).all()
+    defaults = get_campaign_defaults(db, uid)
+    position = req.position.strip() if req.position.strip() else defaults["position"]
+    # Build custom_fields: definition defaults merged with overrides
+    cf_defaults = get_custom_column_defaults(db, uid)
+    custom_fields = {**cf_defaults, **{k: v for k, v in req.custom_field_overrides.items() if v.strip()}} if cf_defaults or req.custom_field_overrides else None
+    created = 0
+    for r in referrals:
+        ec = EmailColumn(
+            sender_email=req.sender_email,
+            recipient_name=r.name,
+            recipient_email=r.email,
+            company=r.company,
+            position=position,
+            template_file=req.template_file,
+            referral_id=r.id,
             sent_status="pending",
             framework=defaults["framework"],
             my_strength=defaults["my_strength"],

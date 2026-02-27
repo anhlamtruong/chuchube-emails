@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Link } from "react-router-dom";
 import { UserButton } from "@clerk/clerk-react";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,9 @@ import {
   Mail,
   Coffee,
   Heart,
+  ShieldAlert,
 } from "lucide-react";
+import { checkAdmin } from "../api/client";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -32,7 +34,7 @@ const navItems = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin?: boolean }) {
   return (
     <>
       <div className="p-5 border-b border-sidebar-border">
@@ -68,6 +70,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             {label}
           </NavLink>
         ))}
+        {isAdmin && (
+          <NavLink
+            to="/admin"
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-sidebar-accent text-sidebar-primary"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+              )
+            }
+          >
+            <ShieldAlert size={18} />
+            Admin
+          </NavLink>
+        )}
       </nav>
       {/* Buy Me a Coffee */}
       <div className="px-3 pb-2">
@@ -110,12 +129,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    checkAdmin()
+      .then((res) => setIsAdmin(res.is_admin))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   return (
     <div className="flex h-screen bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-60 shrink-0 bg-sidebar border-r border-sidebar-border flex-col">
-        <SidebarContent />
+        <SidebarContent isAdmin={isAdmin} />
       </aside>
 
       {/* Mobile Sidebar Overlay */}
@@ -126,7 +152,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onClick={() => setMobileOpen(false)}
           />
           <aside className="fixed left-0 top-0 bottom-0 w-72 bg-sidebar border-r border-sidebar-border flex flex-col z-50">
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent onNavigate={() => setMobileOpen(false)} isAdmin={isAdmin} />
           </aside>
         </div>
       )}

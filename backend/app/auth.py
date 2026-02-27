@@ -1,10 +1,12 @@
 """Clerk JWT authentication — verifies tokens using Clerk's JWKS endpoint."""
 import time
+from datetime import datetime
 import jwt
 import requests
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.config import CLERK_JWKS_URL, SESSION_TIMEOUT_SECONDS
+from sqlalchemy.orm import Session
+from app.config import CLERK_JWKS_URL, SESSION_TIMEOUT_SECONDS, ACCESS_KEY_ENABLED, ADMIN_USER_ID
 from app.logging_config import get_logger
 
 logger = get_logger("auth")
@@ -92,3 +94,36 @@ def get_user_id(auth: dict) -> str:
     if not user_id:
         raise HTTPException(401, "Missing user identifier in token")
     return user_id
+
+
+def validate_access_key(request: Request, user_id: str, db: Session) -> None:
+    """Validate the X-Access-Key header against the access_keys table.
+
+    - Admin user is always exempt.
+    - If ACCESS_KEY_ENABLED is False, skip entirely.
+    - On first use, the key is bound to the user_id.
+    - Subsequent calls from the same user pass; different user → 403.
+    """
+    if not ACCESS_KEY_ENABLED:
+        return
+
+    # Admin is always exempt
+    if user_id == ADMIN_USER_ID:
+        return
+
+    key_value = request.headers.get("x-access-key")
+    if not key_value:
+        raise HTTPException(403, "Access key required. Please enter your access key to use this application.")
+
+    from app.models.access_key import AccessKey
+    ak = db.query(AccessKey).filter(AccessKey.key == key_value, AccessKey.is_active == True).first()  # noqa: E712
+    if not ak:
+        raise HTTPException(403, "Invalid or revoked access key")
+
+    if ak.used_by_user_id is None:
+        # First use — bind to this user
+        ak.used_by_user_id = user_id
+        ak.used_at = datetime.utcnow()
+        db.commit()
+    elif ak.used_by_user_id != user_id:
+        raise HTTPException(403, "This access key is already in use by another account")

@@ -23,8 +23,17 @@ export default function SenderTemplatePicker({
 
   useEffect(() => {
     getSenders().then((r) => setSenders(r.senders));
-    getTemplates().then(setTemplates);
-  }, []);
+    getTemplates().then((tpls) => {
+      setTemplates(tpls);
+      // Auto-select default template if none is selected yet
+      if (!templateFile) {
+        const defaultTpl = tpls.find((t) => t.is_default);
+        if (defaultTpl) {
+          onTemplateChange(defaultTpl.name);
+        }
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -50,7 +59,9 @@ export default function SenderTemplatePicker({
             return (
               <div className="mt-1 flex items-center gap-1">
                 <Badge
-                  variant={selected.provider === "resend" ? "secondary" : "default"}
+                  variant={
+                    selected.provider === "resend" ? "secondary" : "default"
+                  }
                   className="text-[10px] px-1.5 py-0"
                 >
                   {selected.provider === "resend" ? "Resend" : "SMTP"}
@@ -77,6 +88,7 @@ export default function SenderTemplatePicker({
           {templates.map((t) => (
             <option key={t.id} value={t.name}>
               {t.name}
+              {t.is_default ? " ★" : ""}
             </option>
           ))}
         </Select>

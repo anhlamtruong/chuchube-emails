@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { SignedIn, SignedOut, useAuth } from "@clerk/clerk-react";
 import { setClerkTokenGetter } from "./api/client";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
+import AccessKeyPage from "./pages/AccessKeyPage";
 import DashboardPage from "./pages/DashboardPage";
 import RecruitersPage from "./pages/RecruitersPage";
 import ReferralsPage from "./pages/ReferralsPage";
@@ -16,14 +17,23 @@ import ScheduledJobsPage from "./pages/ScheduledJobsPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import ConsentPage from "./pages/ConsentPage";
+import AdminPage from "./pages/AdminPage";
 
 function App() {
   const { getToken } = useAuth();
+  const [hasAccessKey, setHasAccessKey] = useState(
+    () => !!localStorage.getItem("access_key")
+  );
 
   // Wire Clerk's getToken into the axios client so every API call is authenticated
   useEffect(() => {
     setClerkTokenGetter(getToken);
   }, [getToken]);
+
+  // If no access key stored, show the gate screen before anything else
+  if (!hasAccessKey) {
+    return <AccessKeyPage onValidated={() => setHasAccessKey(true)} />;
+  }
 
   return (
     <Routes>
@@ -62,6 +72,7 @@ function App() {
                   <Route path="/terms" element={<TermsPage />} />
                   <Route path="/privacy" element={<PrivacyPage />} />
                   <Route path="/consent" element={<ConsentPage />} />
+                  <Route path="/admin" element={<AdminPage />} />
                 </Routes>
               </Layout>
             </SignedIn>

@@ -9,18 +9,20 @@ class TemplateBase(BaseModel):
 
 
 class TemplateCreate(TemplateBase):
-    pass
+    is_default: bool = False
 
 
 class TemplateUpdate(BaseModel):
     name: str | None = None
     subject_line: str | None = None
     body_html: str | None = None
+    is_default: bool | None = None
 
 
 class TemplateOut(TemplateBase):
     id: str
     user_id: str | None = None
+    is_default: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

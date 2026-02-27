@@ -31,6 +31,7 @@ import {
   CheckCircle2,
   XCircle,
   Columns3,
+  Building2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,10 @@ export default function SettingsPage() {
     smtp_port: 465,
     credential: "",
     is_default: false,
+    organization_name: null,
+    organization_type: null,
+    title: null,
+    city: null,
   });
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountTesting, setAccountTesting] = useState(false);
@@ -117,10 +122,13 @@ export default function SettingsPage() {
   } | null>(null);
 
   // --- Custom Columns state ---
-  const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>([]);
+  const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>(
+    [],
+  );
   const [customColumnsLoading, setCustomColumnsLoading] = useState(true);
   const [showAddColumnDialog, setShowAddColumnDialog] = useState(false);
-  const [editingColumn, setEditingColumn] = useState<CustomColumnDefinition | null>(null);
+  const [editingColumn, setEditingColumn] =
+    useState<CustomColumnDefinition | null>(null);
   const [columnForm, setColumnForm] = useState({ name: "", default_value: "" });
   const [columnSaving, setColumnSaving] = useState(false);
 
@@ -219,6 +227,10 @@ export default function SettingsPage() {
       smtp_port: 465,
       credential: "",
       is_default: false,
+      organization_name: null,
+      organization_type: null,
+      title: null,
+      city: null,
     });
     setEditingAccount(null);
     setTestResult(null);
@@ -239,9 +251,28 @@ export default function SettingsPage() {
       smtp_port: account.smtp_port,
       credential: "", // don't pre-fill credential
       is_default: account.is_default,
+      organization_name: account.organization_name,
+      organization_type: account.organization_type,
+      title: account.title,
+      city: account.city,
     });
     setTestResult(null);
     setShowAddDialog(true);
+  };
+
+  const CONSUMER_DOMAINS = [
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk",
+    "outlook.com", "hotmail.com", "live.com", "msn.com",
+    "aol.com", "icloud.com", "me.com", "mac.com",
+    "protonmail.com", "proton.me", "zoho.com",
+    "yandex.com", "mail.com", "gmx.com", "gmx.net",
+    "fastmail.com", "tutanota.com", "hey.com",
+  ];
+
+  const isOrgEmail = (email: string): boolean => {
+    if (!email || !email.includes("@")) return false;
+    const domain = email.split("@")[1]?.toLowerCase();
+    return !!domain && !CONSUMER_DOMAINS.includes(domain);
   };
 
   const handleTestCredential = async () => {
@@ -377,7 +408,10 @@ export default function SettingsPage() {
   };
 
   const handleDeleteColumn = async (id: string) => {
-    if (!confirm("Delete this custom column definition? This cannot be undone.")) return;
+    if (
+      !confirm("Delete this custom column definition? This cannot be undone.")
+    )
+      return;
     try {
       await deleteCustomColumnDefinition(id);
       toast.success("Column deleted");
@@ -524,9 +558,13 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <div className="mb-4 rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3 text-xs text-indigo-800">
-            Define custom columns with default values. When generating or pasting campaign rows,
-            these columns will be auto-populated with their defaults (unless overridden).
-            Custom columns also appear as <code className="font-mono bg-indigo-100 px-1 rounded">{"{column_name}"}</code> placeholders in your email templates.
+            Define custom columns with default values. When generating or
+            pasting campaign rows, these columns will be auto-populated with
+            their defaults (unless overridden). Custom columns also appear as{" "}
+            <code className="font-mono bg-indigo-100 px-1 rounded">
+              {"{column_name}"}
+            </code>{" "}
+            placeholders in your email templates.
           </div>
 
           {customColumnsLoading ? (
@@ -536,7 +574,8 @@ export default function SettingsPage() {
             </div>
           ) : customColumns.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">
-              No custom columns defined yet. Add one to extend your campaign data.
+              No custom columns defined yet. Add one to extend your campaign
+              data.
             </p>
           ) : (
             <div className="space-y-2">
@@ -548,16 +587,22 @@ export default function SettingsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{col.name}</span>
-                      <Badge variant="secondary" className="text-[10px] font-mono px-1.5 py-0">
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] font-mono px-1.5 py-0"
+                      >
                         {`{${col.name}}`}
                       </Badge>
                     </div>
                     {col.default_value ? (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Default: <span className="font-medium">{col.default_value}</span>
+                        Default:{" "}
+                        <span className="font-medium">{col.default_value}</span>
                       </p>
                     ) : (
-                      <p className="text-xs text-muted-foreground mt-0.5 italic">No default value</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 italic">
+                        No default value
+                      </p>
                     )}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -618,7 +663,8 @@ export default function SettingsPage() {
                 onKeyDown={(e) => e.key === "Enter" && handleSaveColumn()}
               />
               <p className="text-[11px] text-muted-foreground">
-                Use in templates as <code className="font-mono bg-muted px-1 rounded">{`{${columnForm.name || "column_name"}}`}</code>
+                Use in templates as{" "}
+                <code className="font-mono bg-muted px-1 rounded">{`{${columnForm.name || "column_name"}}`}</code>
               </p>
             </div>
 
@@ -629,11 +675,15 @@ export default function SettingsPage() {
                 placeholder="Leave empty for no default"
                 value={columnForm.default_value}
                 onChange={(e) =>
-                  setColumnForm((p) => ({ ...p, default_value: e.target.value }))
+                  setColumnForm((p) => ({
+                    ...p,
+                    default_value: e.target.value,
+                  }))
                 }
               />
               <p className="text-[11px] text-muted-foreground">
-                Auto-populated when creating new campaign rows (can be overridden per-batch)
+                Auto-populated when creating new campaign rows (can be
+                overridden per-batch)
               </p>
             </div>
           </div>
@@ -939,6 +989,84 @@ export default function SettingsPage() {
               />
               <span className="text-sm">Set as default sender</span>
             </label>
+
+            {/* Organization Details — shown for non-consumer email domains */}
+            {isOrgEmail(accountForm.email) && (
+              <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
+                  <Building2 size={15} />
+                  Organization Details
+                </div>
+                <p className="text-[11px] text-muted-foreground -mt-1">
+                  This looks like an organization email. Add details so the admin can categorize it.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5 col-span-2">
+                    <Label htmlFor="acc-org-name">Organization Name</Label>
+                    <Input
+                      id="acc-org-name"
+                      placeholder="e.g. Google, MIT, Stanford"
+                      value={accountForm.organization_name || ""}
+                      onChange={(e) =>
+                        setAccountForm((p) => ({
+                          ...p,
+                          organization_name: e.target.value || null,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="acc-org-type">Type</Label>
+                    <select
+                      id="acc-org-type"
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                      value={accountForm.organization_type || ""}
+                      onChange={(e) =>
+                        setAccountForm((p) => ({
+                          ...p,
+                          organization_type: e.target.value || null,
+                        }))
+                      }
+                    >
+                      <option value="">Select type</option>
+                      <option value="university">University</option>
+                      <option value="company">Company</option>
+                      <option value="nonprofit">Non-Profit</option>
+                      <option value="government">Government</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="acc-title">Title / Role</Label>
+                    <Input
+                      id="acc-title"
+                      placeholder="e.g. Student, SWE Intern"
+                      value={accountForm.title || ""}
+                      onChange={(e) =>
+                        setAccountForm((p) => ({
+                          ...p,
+                          title: e.target.value || null,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5 col-span-2">
+                    <Label htmlFor="acc-city">City</Label>
+                    <Input
+                      id="acc-city"
+                      placeholder="e.g. San Francisco, CA"
+                      value={accountForm.city || ""}
+                      onChange={(e) =>
+                        setAccountForm((p) => ({
+                          ...p,
+                          city: e.target.value || null,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Test result */}
             {testResult && (

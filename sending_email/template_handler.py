@@ -1,5 +1,15 @@
 import os
 import re
+
+
+def safe_substitute(template: str, replacements: dict) -> str:
+    """Replace {placeholder} tokens using regex so CSS braces are left alone."""
+    def _replacer(m: re.Match) -> str:
+        key = m.group(1)
+        return str(replacements.get(key, m.group(0)))
+    return re.sub(r"\{(\w+)\}", _replacer, template)
+
+
 def load_template(template_folder, template_file):
     """
     Loads a template file and splits it into subject and body.
@@ -113,7 +123,7 @@ def personalize_template(subject_template, body_template, row_data, your_name, y
     }
     
     
-    final_subject = subject_template.format_map(replacements)
-    final_body = body_template.format_map(replacements)
+    final_subject = safe_substitute(subject_template, replacements)
+    final_body = safe_substitute(body_template, replacements)
     
     return final_subject, final_body, image_to_embed

@@ -19,5 +19,9 @@ class SenderAccount(Base):
     smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     vault_secret_name: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    organization_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    organization_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "school" | "company"
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

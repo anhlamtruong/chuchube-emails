@@ -11,6 +11,10 @@ class SenderAccountCreate(BaseModel):
     smtp_port: int | None = None
     credential: str  # password (SMTP) or API key (Resend) — never stored in DB
     is_default: bool = False
+    organization_name: str | None = None
+    organization_type: str | None = None  # "school" | "company"
+    title: str | None = None
+    city: str | None = None
 
 
 class SenderAccountUpdate(BaseModel):
@@ -21,6 +25,10 @@ class SenderAccountUpdate(BaseModel):
     smtp_port: int | None = None
     credential: str | None = None  # if provided, updates the vault secret
     is_default: bool | None = None
+    organization_name: str | None = None
+    organization_type: str | None = None
+    title: str | None = None
+    city: str | None = None
 
 
 class SenderAccountOut(BaseModel):
@@ -31,6 +39,10 @@ class SenderAccountOut(BaseModel):
     smtp_host: str | None
     smtp_port: int | None
     is_default: bool
+    organization_name: str | None = None
+    organization_type: str | None = None
+    title: str | None = None
+    city: str | None = None
     created_at: datetime
     updated_at: datetime
 

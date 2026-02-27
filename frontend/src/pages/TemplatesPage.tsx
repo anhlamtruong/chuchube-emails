@@ -8,6 +8,7 @@ import {
   updateTemplate,
   deleteTemplate,
   previewTemplate,
+  setTemplateDefault,
   getCustomColumnDefinitions,
 } from "@/api/client";
 import type { Template, CustomColumnDefinition } from "@/api/client";
@@ -31,7 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
 } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, Eye, Save, Lock } from "lucide-react";
+import { Plus, Trash2, Eye, Save, Lock, Star } from "lucide-react";
 import { toast } from "sonner";
 
 const BUILT_IN_PLACEHOLDERS = [
@@ -61,7 +62,9 @@ export default function TemplatesPage() {
   const [hasChanges, setHasChanges] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [discardTarget, setDiscardTarget] = useState<Template | null>(null);
-  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>([]);
+  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>(
+    [],
+  );
 
   const myTemplates = templates.filter((t) => (t as any).user_id);
   const systemTemplates = templates.filter((t) => !(t as any).user_id);
@@ -73,7 +76,9 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     load();
-    getCustomColumnDefinitions().then(setCustomColDefs).catch(() => {});
+    getCustomColumnDefinitions()
+      .then(setCustomColDefs)
+      .catch(() => {});
   }, []);
 
   const selectTemplate = async (t: Template) => {
@@ -160,6 +165,16 @@ export default function TemplatesPage() {
 
   const isSystem = (t: Template) => !(t as any).user_id;
 
+  const handleToggleDefault = async (t: Template) => {
+    try {
+      await setTemplateDefault(t.id);
+      toast.success(t.is_default ? "Default removed" : `"${t.name}" set as default`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to set default");
+    }
+  };
+
   const placeholders = useMemo(() => {
     const custom = customColDefs.map((d) => `{${d.name}}`);
     const builtInSet = new Set(BUILT_IN_PLACEHOLDERS);
@@ -182,18 +197,37 @@ export default function TemplatesPage() {
           <Lock size={12} className="text-muted-foreground shrink-0" />
         )}
         {t.name}
+        {t.is_default && (
+          <Star size={12} className="text-yellow-500 fill-yellow-500 shrink-0" />
+        )}
       </span>
-      {!isSystem(t) && (
+      <div className="flex items-center gap-0.5">
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setDeleteId(t.id);
+            handleToggleDefault(t);
           }}
-          className="p-1 text-muted-foreground hover:text-destructive cursor-pointer"
+          className={`p-1 cursor-pointer ${
+            t.is_default
+              ? "text-yellow-500 hover:text-yellow-600"
+              : "text-muted-foreground hover:text-yellow-500"
+          }`}
+          title={t.is_default ? "Remove default" : "Set as default"}
         >
-          <Trash2 size={14} />
+          <Star size={14} className={t.is_default ? "fill-yellow-500" : ""} />
         </button>
-      )}
+        {!isSystem(t) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteId(t.id);
+            }}
+            className="p-1 text-muted-foreground hover:text-destructive cursor-pointer"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
     </div>
   );
 

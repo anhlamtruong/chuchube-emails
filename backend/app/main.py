@@ -2,7 +2,7 @@
 import os
 import re
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
@@ -24,8 +24,10 @@ from app.models.referral import Referral  # noqa: F401 – register model
 from app.models.sender_account import SenderAccount  # noqa: F401 – register model
 from app.models.audit_log import AuditLog  # noqa: F401 – register model
 from app.models.custom_column import CustomColumnDefinition  # noqa: F401 – register model
+from app.models.access_key import AccessKey  # noqa: F401 – register model
 
 from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs, custom_columns
+from app.routers import admin as admin_router
 from app.background import start_scheduler, stop_scheduler
 
 
@@ -148,6 +150,73 @@ app.include_router(consent.router, dependencies=[Depends(require_auth)])
 app.include_router(sender_accounts.router, dependencies=[Depends(require_auth)])
 app.include_router(audit_logs.router, dependencies=[Depends(require_auth)])
 app.include_router(custom_columns.router, dependencies=[Depends(require_auth)])
+app.include_router(admin_router.router, dependencies=[Depends(require_auth)])
+
+
+# --- Access key validation middleware ---
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse as StarletteJSONResponse
+
+class AccessKeyMiddleware(BaseHTTPMiddleware):
+    """Validate X-Access-Key on every authenticated API request.
+
+    Exempt paths: /api/health, /api/auth/validate-access-key, /api/admin/*
+    """
+    EXEMPT_PREFIXES = ("/api/health", "/api/auth/validate-access-key", "/api/admin/")
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        # Skip non-API routes and exempt paths
+        if not path.startswith("/api") or any(path.startswith(p) for p in self.EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        # Only validate if there's an auth token (unauthenticated requests handled by require_auth)
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            try:
+                from app.auth import verify_clerk_token, validate_access_key
+                payload = verify_clerk_token(auth_header.split(" ", 1)[1])
+                uid = payload.get("sub")
+                if uid:
+                    db = SessionLocal()
+                    try:
+                        validate_access_key(request, uid, db)
+                    except HTTPException as e:
+                        return StarletteJSONResponse(
+                            status_code=e.status_code,
+                            content={"detail": e.detail},
+                        )
+                    finally:
+                        db.close()
+            except Exception:
+                pass  # Let the actual endpoint handler deal with auth errors
+
+        return await call_next(request)
+
+
+from app.config import ACCESS_KEY_ENABLED
+if ACCESS_KEY_ENABLED:
+    app.add_middleware(AccessKeyMiddleware)
+
+
+# --- Access key validation endpoint (pre-auth) ---
+from pydantic import BaseModel as PydanticBaseModel
+
+class _AccessKeyValidateBody(PydanticBaseModel):
+    key: str
+
+@app.post("/api/auth/validate-access-key")
+def validate_access_key_endpoint(body: _AccessKeyValidateBody):
+    """Public endpoint to check if an access key is valid (before login)."""
+    from app.models.access_key import AccessKey as AK
+    db = SessionLocal()
+    try:
+        ak = db.query(AK).filter(AK.key == body.key, AK.is_active == True).first()  # noqa: E712
+        if not ak:
+            raise HTTPException(403, "Invalid or revoked access key")
+        return {"valid": True, "label": ak.label}
+    finally:
+        db.close()
 
 
 # --- Health check ---

@@ -10,6 +10,7 @@ from app.schemas.template import (
     TemplateOut,
     TemplatePreviewRequest,
 )
+from app.services.template_handler import safe_substitute
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -46,6 +47,11 @@ def create_template(data: TemplateCreate, auth: dict = Depends(require_auth), db
     )
     if existing:
         raise HTTPException(409, f"Template '{data.name}' already exists")
+    # If setting as default, clear existing default for this user
+    if data.is_default:
+        db.query(Template).filter(
+            Template.user_id == uid, Template.is_default == True  # noqa: E712
+        ).update({"is_default": False})
     t = Template(**data.model_dump(), user_id=uid)
     db.add(t)
     db.commit()
@@ -63,8 +69,42 @@ def update_template(template_id: str, data: TemplateUpdate, auth: dict = Depends
         raise HTTPException(403, "Cannot edit system templates")
     if t.user_id != uid:
         raise HTTPException(403, "Not your template")
-    for key, val in data.model_dump(exclude_unset=True).items():
+    update_data = data.model_dump(exclude_unset=True)
+    # If setting as default, clear existing default for this user
+    if update_data.get("is_default") is True:
+        db.query(Template).filter(
+            Template.user_id == uid,
+            Template.is_default == True,  # noqa: E712
+            Template.id != template_id,
+        ).update({"is_default": False})
+    for key, val in update_data.items():
         setattr(t, key, val)
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+@router.put("/{template_id}/set-default", response_model=TemplateOut)
+def set_template_default(template_id: str, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Toggle a template as the user's default. Clears any other default."""
+    uid = get_user_id(auth)
+    t = db.query(Template).get(template_id)
+    if not t:
+        raise HTTPException(404, "Template not found")
+    if t.user_id is not None and t.user_id != uid:
+        raise HTTPException(403, "Not your template")
+
+    # If it's already default, unset it
+    if t.is_default:
+        t.is_default = False
+    else:
+        # Clear any existing default for this user (including system templates marked as default by this user)
+        db.query(Template).filter(
+            or_(Template.user_id == uid, Template.user_id.is_(None)),
+            Template.is_default == True,  # noqa: E712
+        ).update({"is_default": False}, synchronize_session="fetch")
+        t.is_default = True
+
     db.commit()
     db.refresh(t)
     return t
@@ -113,10 +153,7 @@ def preview_template(
         "dynamic_image_tag": "",
     }
 
-    try:
-        subject = t.subject_line.format_map(replacements)
-        body = t.body_html.format_map(replacements)
-    except KeyError as e:
-        raise HTTPException(400, f"Missing placeholder in preview data: {e}")
+    subject = safe_substitute(t.subject_line, replacements)
+    body = safe_substitute(t.body_html, replacements)
 
     return {"subject": subject, "body": body}

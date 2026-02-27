@@ -11,6 +11,7 @@ import {
   importCampaigns,
   exportCampaigns,
   generateFromRecruiters,
+  generateFromReferrals,
   bulkPasteCampaigns,
   getCustomColumns,
   getCampaignDefaults,
@@ -18,7 +19,11 @@ import {
   getCustomColumnDefinitions,
   createCustomColumnDefinition,
 } from "@/api/client";
-import type { Campaign, ClipboardPreviewRow, CustomColumnDefinition } from "@/api/client";
+import type {
+  Campaign,
+  ClipboardPreviewRow,
+  CustomColumnDefinition,
+} from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +58,7 @@ import {
 import { toast } from "sonner";
 import ClipboardPasteModal from "@/components/ClipboardPasteModal";
 import RecruiterFilterPicker from "@/components/RecruiterFilterPicker";
+import ReferralFilterPicker from "@/components/ReferralFilterPicker";
 import SenderTemplatePicker from "@/components/SenderTemplatePicker";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -65,7 +71,9 @@ export default function CampaignsPage() {
   const [dirty, setDirty] = useState<Map<string, Partial<Campaign>>>(new Map());
   const gridRef = useRef<AgGridReact>(null);
   const [customCols, setCustomCols] = useState<string[]>([]);
-  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>([]);
+  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>(
+    [],
+  );
   const [templateNames, setTemplateNames] = useState<string[]>([]);
 
   // Modal states
@@ -80,17 +88,25 @@ export default function CampaignsPage() {
   const [newColName, setNewColName] = useState("");
 
   // Generate modal state
+  const [genSource, setGenSource] = useState<"recruiters" | "referrals">(
+    "recruiters",
+  );
   const [genRecruiterIds, setGenRecruiterIds] = useState<string[]>([]);
+  const [genReferralIds, setGenReferralIds] = useState<string[]>([]);
   const [genSender, setGenSender] = useState("");
-  const [genTemplate, setGenTemplate] = useState("template_recruiter_ceo");
+  const [genTemplate, setGenTemplate] = useState("");
   const [genPosition, setGenPosition] = useState("");
-  const [genCustomOverrides, setGenCustomOverrides] = useState<Record<string, string>>({});
+  const [genCustomOverrides, setGenCustomOverrides] = useState<
+    Record<string, string>
+  >({});
 
   // Paste modal state
   const [pasteSender, setPasteSender] = useState("");
-  const [pasteTemplate, setPasteTemplate] = useState("template_recruiter_ceo");
+  const [pasteTemplate, setPasteTemplate] = useState("");
   const [pastePosition, setPastePosition] = useState("");
-  const [pasteCustomOverrides, setPasteCustomOverrides] = useState<Record<string, string>>({});
+  const [pasteCustomOverrides, setPasteCustomOverrides] = useState<
+    Record<string, string>
+  >({});
   const [defaultPosition, setDefaultPosition] = useState("");
 
   // Loading states
@@ -432,8 +448,11 @@ export default function CampaignsPage() {
 
   // Generate from recruiters
   const handleGenerate = async () => {
-    if (genRecruiterIds.length === 0) {
-      toast.error("Select at least one recruiter");
+    const ids = genSource === "recruiters" ? genRecruiterIds : genReferralIds;
+    if (ids.length === 0) {
+      toast.error(
+        `Select at least one ${genSource === "recruiters" ? "recruiter" : "referral"}`,
+      );
       return;
     }
     if (!genSender || !genTemplate) {
@@ -441,20 +460,31 @@ export default function CampaignsPage() {
       return;
     }
     try {
-      const result = await generateFromRecruiters({
-        recruiter_ids: genRecruiterIds,
-        sender_email: genSender,
-        template_file: genTemplate,
-        position: genPosition,
-        custom_field_overrides: genCustomOverrides,
-      });
+      const result =
+        genSource === "recruiters"
+          ? await generateFromRecruiters({
+              recruiter_ids: genRecruiterIds,
+              sender_email: genSender,
+              template_file: genTemplate,
+              position: genPosition,
+              custom_field_overrides: genCustomOverrides,
+            })
+          : await generateFromReferrals({
+              referral_ids: genReferralIds,
+              sender_email: genSender,
+              template_file: genTemplate,
+              position: genPosition,
+              custom_field_overrides: genCustomOverrides,
+            });
       toast.success(`Created ${result.created} campaign rows`);
       setShowGenerate(false);
       setGenRecruiterIds([]);
+      setGenReferralIds([]);
       setGenSender("");
       setGenTemplate("template_recruiter_ceo");
       setGenPosition("");
       setGenCustomOverrides({});
+      setGenSource("recruiters");
       load();
     } catch {
       toast.error("Generation failed");
@@ -682,13 +712,30 @@ export default function CampaignsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Generate from Recruiters Dialog */}
+      {/* Generate from Recruiters/Referrals Dialog */}
       <Dialog open={showGenerate} onOpenChange={setShowGenerate}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Generate Campaign from Recruiters</DialogTitle>
+            <DialogTitle>Generate Campaign</DialogTitle>
           </DialogHeader>
           <div className="space-y-6 py-2">
+            {/* Source toggle */}
+            <div className="flex gap-1 rounded-lg bg-muted p-1">
+              {(["recruiters", "referrals"] as const).map((src) => (
+                <button
+                  key={src}
+                  onClick={() => setGenSource(src)}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                    genSource === src
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {src === "recruiters" ? "From Recruiters" : "From Referrals"}
+                </button>
+              ))}
+            </div>
+
             <SenderTemplatePicker
               senderEmail={genSender}
               templateFile={genTemplate}
@@ -717,7 +764,9 @@ export default function CampaignsPage() {
             {/* Custom column override fields */}
             {customColDefs.length > 0 && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-muted-foreground">Custom Fields</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Custom Fields
+                </p>
                 {customColDefs.map((def) => (
                   <div key={def.id}>
                     <Label className="text-sm">{def.name}</Label>
@@ -748,11 +797,19 @@ export default function CampaignsPage() {
             )}
             <div>
               <p className="text-sm font-medium mb-2">
-                Select recruiters to include:
+                {genSource === "recruiters"
+                  ? "Select recruiters to include:"
+                  : "Select referrals to include:"}
               </p>
-              <RecruiterFilterPicker
-                onSelectionChange={(ids) => setGenRecruiterIds(ids)}
-              />
+              {genSource === "recruiters" ? (
+                <RecruiterFilterPicker
+                  onSelectionChange={(ids) => setGenRecruiterIds(ids)}
+                />
+              ) : (
+                <ReferralFilterPicker
+                  onSelectionChange={(ids) => setGenReferralIds(ids)}
+                />
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -762,10 +819,18 @@ export default function CampaignsPage() {
             <Button
               onClick={handleGenerate}
               disabled={
-                genRecruiterIds.length === 0 || !genSender || !genTemplate
+                (genSource === "recruiters"
+                  ? genRecruiterIds.length === 0
+                  : genReferralIds.length === 0) ||
+                !genSender ||
+                !genTemplate
               }
             >
-              Generate {genRecruiterIds.length} Row(s)
+              Generate{" "}
+              {genSource === "recruiters"
+                ? genRecruiterIds.length
+                : genReferralIds.length}{" "}
+              Row(s)
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -810,7 +875,9 @@ export default function CampaignsPage() {
             {/* Custom column override fields */}
             {customColDefs.length > 0 && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-muted-foreground">Custom Fields</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Custom Fields
+                </p>
                 {customColDefs.map((def) => (
                   <div key={def.id}>
                     <Label className="text-sm">{def.name}</Label>

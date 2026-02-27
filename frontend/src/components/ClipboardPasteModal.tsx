@@ -160,7 +160,10 @@ export default function ClipboardPasteModal({
                 </span>
               )}
               {unmapped.length > 0 && (
-                <Badge variant="outline" className="text-amber-600 border-amber-300">
+                <Badge
+                  variant="outline"
+                  className="text-amber-600 border-amber-300"
+                >
                   Unmapped: {unmapped.join(", ")}
                 </Badge>
               )}
@@ -179,9 +182,13 @@ export default function ClipboardPasteModal({
                 <TableBody>
                   {preview.map((row, i) => (
                     <TableRow key={i}>
-                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {i + 1}
+                      </TableCell>
                       <TableCell className="font-medium">{row.name}</TableCell>
-                      <TableCell className="text-primary">{row.email}</TableCell>
+                      <TableCell className="text-primary">
+                        {row.email}
+                      </TableCell>
                       <TableCell>{row.title}</TableCell>
                       <TableCell>{row.company}</TableCell>
                       <TableCell>{row.location}</TableCell>

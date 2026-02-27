@@ -3,6 +3,19 @@ import os
 import re
 
 
+def safe_substitute(template: str, replacements: dict[str, str]) -> str:
+    """Replace {placeholder} tokens using regex so CSS braces are left alone.
+
+    Only matches `{word_chars}` — bare `{ property: value; }` in CSS is
+    never touched.
+    """
+    def _replacer(m: re.Match) -> str:
+        key = m.group(1)
+        return replacements.get(key, m.group(0))  # keep unknown placeholders
+
+    return re.sub(r"\{(\w+)\}", _replacer, template)
+
+
 def load_template_from_file(template_folder: str, template_file: str) -> tuple[str, str]:
     """Load template from file, split into (subject, body) on '---' separator."""
     template_path = os.path.join(template_folder, template_file)
@@ -94,13 +107,7 @@ def personalize_template(
     if extra_fields:
         replacements.update(extra_fields)
 
-    # SafeDict leaves unknown {placeholders} intact instead of raising KeyError
-    class SafeDict(dict):
-        def __missing__(self, key):
-            return "{" + key + "}"
-
-    safe = SafeDict(replacements)
-    final_subject = subject_template.format_map(safe)
-    final_body = body_template.format_map(safe)
+    final_subject = safe_substitute(subject_template, replacements)
+    final_body = safe_substitute(body_template, replacements)
 
     return final_subject, final_body, image_to_embed

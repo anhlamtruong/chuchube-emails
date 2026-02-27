@@ -69,6 +69,10 @@ def create_sender_account(
         smtp_port=data.smtp_port or (465 if data.provider == "smtp" else None),
         vault_secret_name="placeholder",  # will update after insert
         is_default=data.is_default,
+        organization_name=data.organization_name,
+        organization_type=data.organization_type,
+        title=data.title,
+        city=data.city,
     )
     db.add(account)
     db.flush()  # get id without committing
@@ -127,7 +131,8 @@ def update_sender_account(
         ).update({"is_default": False})
 
     # Update fields
-    for field in ("email", "display_name", "provider", "smtp_host", "smtp_port", "is_default"):
+    for field in ("email", "display_name", "provider", "smtp_host", "smtp_port", "is_default",
+                  "organization_name", "organization_type", "title", "city"):
         val = getattr(data, field, None)
         if val is not None:
             setattr(account, field, val)

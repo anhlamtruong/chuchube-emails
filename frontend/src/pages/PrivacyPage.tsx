@@ -57,32 +57,32 @@ export default function PrivacyPage() {
               To send emails on your behalf using credentials you provide.
             </li>
             <li>
-              To maintain an audit trail of your consent, credential access,
-              and email-sending activity for security and compliance.
+              To maintain an audit trail of your consent, credential access, and
+              email-sending activity for security and compliance.
             </li>
             <li>To improve the Service and troubleshoot issues.</li>
             <li>
               To enforce per-user data isolation so your data is never visible
               to other users.
             </li>
-            <li>
-              To enforce rate limits and prevent abuse of the Service.
-            </li>
+            <li>To enforce rate limits and prevent abuse of the Service.</li>
           </ul>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">3. Data Storage &amp; Security</CardTitle>
+          <CardTitle className="text-lg">
+            3. Data Storage &amp; Security
+          </CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>Your data is protected by multiple layers of security:</p>
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong>Database</strong> — PostgreSQL hosted on Supabase with
-              TLS-encrypted connections and Row-Level Security (RLS) policies
-              on all user-scoped tables.
+              TLS-encrypted connections and Row-Level Security (RLS) policies on
+              all user-scoped tables.
             </li>
             <li>
               <strong>Credential encryption</strong> — Email passwords and API
@@ -101,8 +101,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>User isolation</strong> — Settings, sender accounts,
-              campaigns, and documents are scoped to your user ID. No
-              cross-user data access is possible through the API.
+              campaigns, and documents are scoped to your user ID. No cross-user
+              data access is possible through the API.
             </li>
             <li>
               <strong>Audit logging</strong> — All credential access, email
@@ -111,9 +111,9 @@ export default function PrivacyPage() {
               agents.
             </li>
             <li>
-              <strong>Rate limiting</strong> — API requests are rate-limited
-              per user (200/minute default) to prevent abuse and protect
-              service availability.
+              <strong>Rate limiting</strong> — API requests are rate-limited per
+              user (200/minute default) to prevent abuse and protect service
+              availability.
             </li>
           </ul>
         </CardContent>
@@ -136,7 +136,9 @@ export default function PrivacyPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">5. Data Retention &amp; Deletion</CardTitle>
+          <CardTitle className="text-lg">
+            5. Data Retention &amp; Deletion
+          </CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <ul className="list-disc pl-5 space-y-2">
@@ -213,7 +215,9 @@ export default function PrivacyPage() {
           <CardTitle className="text-lg">8. Third-Party Services</CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
-          <p>The Service integrates with the following third-party providers:</p>
+          <p>
+            The Service integrates with the following third-party providers:
+          </p>
           <ul className="list-disc pl-5 space-y-2">
             <li>
               <strong>Clerk</strong> — Authentication &amp; identity management.

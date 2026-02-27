@@ -23,8 +23,9 @@ from app.models.user_consent import UserConsent  # noqa: F401 – register model
 from app.models.referral import Referral  # noqa: F401 – register model
 from app.models.sender_account import SenderAccount  # noqa: F401 – register model
 from app.models.audit_log import AuditLog  # noqa: F401 – register model
+from app.models.custom_column import CustomColumnDefinition  # noqa: F401 – register model
 
-from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs
+from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs, custom_columns
 from app.background import start_scheduler, stop_scheduler
 
 
@@ -146,6 +147,7 @@ app.include_router(settings.router, dependencies=[Depends(require_auth)])
 app.include_router(consent.router, dependencies=[Depends(require_auth)])
 app.include_router(sender_accounts.router, dependencies=[Depends(require_auth)])
 app.include_router(audit_logs.router, dependencies=[Depends(require_auth)])
+app.include_router(custom_columns.router, dependencies=[Depends(require_auth)])
 
 
 # --- Health check ---

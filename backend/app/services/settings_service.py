@@ -1,6 +1,7 @@
 """Settings helper — provides quick access to per-user setting values from the DB."""
 from sqlalchemy.orm import Session
 from app.models.setting import Setting, DEFAULT_SETTINGS
+from app.models.custom_column import CustomColumnDefinition
 from app import config
 
 
@@ -64,3 +65,14 @@ def get_smtp_settings(db: Session, user_id: str) -> dict[str, str]:
         "smtp_port": lookup.get("smtp_port", "465"),
         "sleep_between_emails": lookup.get("sleep_between_emails", "2"),
     }
+
+
+def get_custom_column_defaults(db: Session, user_id: str) -> dict[str, str]:
+    """Return a dict mapping custom column name → default_value for the user."""
+    cols = (
+        db.query(CustomColumnDefinition)
+        .filter(CustomColumnDefinition.user_id == user_id)
+        .order_by(CustomColumnDefinition.sort_order)
+        .all()
+    )
+    return {c.name: c.default_value for c in cols if c.default_value}

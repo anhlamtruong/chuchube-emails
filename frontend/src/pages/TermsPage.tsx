@@ -78,7 +78,9 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">4. Account &amp; Authentication</CardTitle>
+          <CardTitle className="text-lg">
+            4. Account &amp; Authentication
+          </CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -95,7 +97,9 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">5. Credential Storage &amp; Security</CardTitle>
+          <CardTitle className="text-lg">
+            5. Credential Storage &amp; Security
+          </CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -113,7 +117,9 @@ export default function TermsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">6. Audit Logging &amp; Monitoring</CardTitle>
+          <CardTitle className="text-lg">
+            6. Audit Logging &amp; Monitoring
+          </CardTitle>
         </CardHeader>
         <CardContent className="prose prose-sm dark:prose-invert max-w-none space-y-3 text-muted-foreground">
           <p>
@@ -127,8 +133,8 @@ export default function TermsPage() {
             <li>Session timeout and authentication events.</li>
           </ul>
           <p>
-            You may view your own audit logs at any time through the API.
-            Audit records include your user ID, IP address, user agent, and
+            You may view your own audit logs at any time through the API. Audit
+            records include your user ID, IP address, user agent, and
             timestamps. These logs are retained for compliance and security
             investigation purposes.
           </p>
@@ -183,8 +189,8 @@ export default function TermsPage() {
               phishing attempts, or malware.
             </li>
             <li>
-              You must not use automated tools to scrape, overload, or abuse
-              the Service beyond its intended functionality.
+              You must not use automated tools to scrape, overload, or abuse the
+              Service beyond its intended functionality.
             </li>
           </ul>
         </CardContent>

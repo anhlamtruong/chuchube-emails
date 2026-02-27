@@ -8,7 +8,7 @@ from app.database import get_db
 from app.auth import require_auth, get_user_id
 from app.services.excel_handler import import_excel, import_recruiters_from_excel, export_excel
 from app.services.clipboard_parser import parse_clipboard_text
-from app.services.settings_service import get_campaign_defaults
+from app.services.settings_service import get_campaign_defaults, get_custom_column_defaults
 from app.models.recruiter import Recruiter
 from app.models.referral import Referral
 from app.models.email_column import EmailColumn
@@ -145,6 +145,8 @@ def commit_clipboard(req: ClipboardCommitRequest, auth: dict = Depends(require_a
         # Create campaign row if requested
         if req.target == "both" and req.campaign_defaults:
             defaults = get_campaign_defaults(db, uid)
+            cf_defaults = get_custom_column_defaults(db, uid)
+            custom_fields = cf_defaults if cf_defaults else None
             ec = EmailColumn(
                 sender_email=req.campaign_defaults.sender_email,
                 recipient_name=record.name,
@@ -157,6 +159,8 @@ def commit_clipboard(req: ClipboardCommitRequest, auth: dict = Depends(require_a
                 framework=defaults["framework"],
                 my_strength=defaults["my_strength"],
                 audience_value=defaults["audience_value"],
+                custom_fields=custom_fields,
+                user_id=uid,
             )
             db.add(ec)
             campaigns_created += 1

@@ -2,6 +2,15 @@ import { useEffect, useState, useCallback } from "react";
 import { getRecruiters } from "@/api/client";
 import type { Recruiter } from "@/api/client";
 import { Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableHead,
+  TableRow,
+  TableCell,
+} from "@/components/ui/table";
 
 interface Props {
   onSelectionChange: (ids: string[], recruiters: Recruiter[]) => void;
@@ -70,105 +79,97 @@ export default function RecruiterFilterPicker({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <div className="relative">
           <Search
-            className="absolute left-2.5 top-2.5 text-gray-400"
+            className="absolute left-2.5 top-2.5 text-muted-foreground"
             size={14}
           />
-          <input
+          <Input
             type="text"
             placeholder="Search…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="pl-8"
           />
         </div>
-        <input
+        <Input
           type="text"
           placeholder="Company…"
           value={company}
           onChange={(e) => setCompany(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <input
+        <Input
           type="text"
           placeholder="Location…"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <input
+        <Input
           type="text"
           placeholder="Title…"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
 
       {/* Table */}
-      <div className="border border-gray-200 rounded-lg overflow-auto max-h-64">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
-            <tr>
-              <th className="px-3 py-2 w-8">
+      <div className="border border-border rounded-lg overflow-auto max-h-64">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-8">
                 <input
                   type="checkbox"
                   checked={
                     recruiters.length > 0 && selected.size === recruiters.length
                   }
                   onChange={toggleAll}
-                  className="cursor-pointer"
+                  className="cursor-pointer rounded"
                 />
-              </th>
+              </TableHead>
               {["Name", "Email", "Company", "Title", "Location"].map((h) => (
-                <th
-                  key={h}
-                  className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  {h}
-                </th>
+                <TableHead key={h}>{h}</TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-gray-500">
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Loading…
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : recruiters.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-gray-500">
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   No recruiters match filters
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : (
               recruiters.map((r) => (
-                <tr
+                <TableRow
                   key={r.id}
-                  className={`cursor-pointer hover:bg-gray-50 ${selected.has(r.id) ? "bg-blue-50" : ""}`}
+                  className={`cursor-pointer ${selected.has(r.id) ? "bg-primary/5" : ""}`}
                   onClick={() => toggle(r.id)}
                 >
-                  <td className="px-3 py-2">
+                  <TableCell>
                     <input
                       type="checkbox"
                       checked={selected.has(r.id)}
                       onChange={() => toggle(r.id)}
-                      className="cursor-pointer"
+                      className="cursor-pointer rounded"
                     />
-                  </td>
-                  <td className="px-3 py-2 font-medium">{r.name}</td>
-                  <td className="px-3 py-2 text-blue-600">{r.email}</td>
-                  <td className="px-3 py-2">{r.company}</td>
-                  <td className="px-3 py-2">{r.title}</td>
-                  <td className="px-3 py-2">{r.location}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-primary">{r.email}</TableCell>
+                  <TableCell>{r.company}</TableCell>
+                  <TableCell>{r.title}</TableCell>
+                  <TableCell>{r.location}</TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
-      <div className="text-xs text-gray-500">
+      <div className="text-xs text-muted-foreground">
         {selected.size} of {recruiters.length} selected
         {selected.size > 0 && (
           <button
@@ -176,7 +177,7 @@ export default function RecruiterFilterPicker({
               setSelected(new Set());
               onSelectionChange([], []);
             }}
-            className="ml-2 text-blue-600 hover:underline cursor-pointer"
+            className="ml-2 text-primary hover:underline cursor-pointer"
           >
             Clear
           </button>

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import {
   getTemplates,
@@ -8,8 +8,9 @@ import {
   updateTemplate,
   deleteTemplate,
   previewTemplate,
+  getCustomColumnDefinitions,
 } from "@/api/client";
-import type { Template } from "@/api/client";
+import type { Template, CustomColumnDefinition } from "@/api/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,19 @@ import {
 import { Plus, Trash2, Eye, Save, Lock } from "lucide-react";
 import { toast } from "sonner";
 
+const BUILT_IN_PLACEHOLDERS = [
+  "{first_name}",
+  "{company}",
+  "{position}",
+  "{value_prop_sentence}",
+  "{your_name}",
+  "{your_phone_number}",
+  "{your_email}",
+  "{your_city_and_state}",
+  "{dynamic_image_tag}",
+  "{name}",
+];
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selected, setSelected] = useState<Template | null>(null);
@@ -47,6 +61,7 @@ export default function TemplatesPage() {
   const [hasChanges, setHasChanges] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [discardTarget, setDiscardTarget] = useState<Template | null>(null);
+  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>([]);
 
   const myTemplates = templates.filter((t) => (t as any).user_id);
   const systemTemplates = templates.filter((t) => !(t as any).user_id);
@@ -58,6 +73,7 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     load();
+    getCustomColumnDefinitions().then(setCustomColDefs).catch(() => {});
   }, []);
 
   const selectTemplate = async (t: Template) => {
@@ -144,18 +160,12 @@ export default function TemplatesPage() {
 
   const isSystem = (t: Template) => !(t as any).user_id;
 
-  const placeholders = [
-    "{first_name}",
-    "{company}",
-    "{position}",
-    "{value_prop_sentence}",
-    "{your_name}",
-    "{your_phone_number}",
-    "{your_email}",
-    "{your_city_and_state}",
-    "{dynamic_image_tag}",
-    "{name}",
-  ];
+  const placeholders = useMemo(() => {
+    const custom = customColDefs.map((d) => `{${d.name}}`);
+    const builtInSet = new Set(BUILT_IN_PLACEHOLDERS);
+    const extras = custom.filter((p) => !builtInSet.has(p));
+    return [...BUILT_IN_PLACEHOLDERS, ...extras];
+  }, [customColDefs]);
 
   const renderTemplateItem = (t: Template) => (
     <div

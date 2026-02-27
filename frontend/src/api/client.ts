@@ -136,6 +136,39 @@ export const getCustomColumns = () =>
     .get<{ columns: string[] }>("/campaigns/custom-columns")
     .then((r) => r.data.columns);
 
+// --- Custom Column Definitions ---
+export interface CustomColumnDefinition {
+  id: string;
+  user_id: string;
+  name: string;
+  default_value: string;
+  sort_order: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export const getCustomColumnDefinitions = () =>
+  api
+    .get<CustomColumnDefinition[]>("/custom-columns/")
+    .then((r) => r.data);
+
+export const createCustomColumnDefinition = (data: {
+  name: string;
+  default_value?: string;
+  sort_order?: number;
+}) => api.post<CustomColumnDefinition>("/custom-columns/", data).then((r) => r.data);
+
+export const updateCustomColumnDefinition = (
+  id: string,
+  data: { name?: string; default_value?: string; sort_order?: number },
+) => api.put<CustomColumnDefinition>(`/custom-columns/${id}`, data).then((r) => r.data);
+
+export const deleteCustomColumnDefinition = (id: string) =>
+  api.delete(`/custom-columns/${id}`).then((r) => r.data);
+
+export const reorderCustomColumns = (order: string[]) =>
+  api.put("/custom-columns/reorder/bulk", order).then((r) => r.data);
+
 export const getCampaignCount = () =>
   api
     .get<{
@@ -248,17 +281,26 @@ export const getSenderAccounts = () =>
 export const createSenderAccount = (data: SenderAccountCreate) =>
   api.post<SenderAccount>("/sender-accounts/", data).then((r) => r.data);
 
-export const updateSenderAccount = (id: string, data: Partial<SenderAccountCreate>) =>
-  api.put<SenderAccount>(`/sender-accounts/${id}`, data).then((r) => r.data);
+export const updateSenderAccount = (
+  id: string,
+  data: Partial<SenderAccountCreate>,
+) => api.put<SenderAccount>(`/sender-accounts/${id}`, data).then((r) => r.data);
 
 export const deleteSenderAccount = (id: string) =>
   api.delete(`/sender-accounts/${id}`).then((r) => r.data);
 
 export const testSenderAccount = (id: string) =>
-  api.post<{ status: string; detail: string }>(`/sender-accounts/${id}/test`).then((r) => r.data);
+  api
+    .post<{ status: string; detail: string }>(`/sender-accounts/${id}/test`)
+    .then((r) => r.data);
 
 export const testSenderCredential = (data: SenderAccountCreate) =>
-  api.post<{ status: string; detail: string }>("/sender-accounts/test-credential", data).then((r) => r.data);
+  api
+    .post<{
+      status: string;
+      detail: string;
+    }>("/sender-accounts/test-credential", data)
+    .then((r) => r.data);
 
 // --- Scheduling ---
 export interface ScheduledJob {
@@ -381,6 +423,8 @@ export const generateFromRecruiters = (data: {
   recruiter_ids: string[];
   sender_email: string;
   template_file: string;
+  position?: string;
+  custom_field_overrides?: Record<string, string>;
 }) => api.post("/campaigns/generate-from-recruiters", data).then((r) => r.data);
 
 export const bulkPasteCampaigns = (data: {
@@ -388,6 +432,7 @@ export const bulkPasteCampaigns = (data: {
   sender_email: string;
   template_file: string;
   position?: string;
+  custom_field_overrides?: Record<string, string>;
 }) => api.post("/campaigns/bulk-paste", data).then((r) => r.data);
 
 // --- Documents ---

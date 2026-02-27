@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { getSenders, getTemplates } from "@/api/client";
 import type { Template, SenderInfo } from "@/api/client";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 
 interface Props {
   senderEmail: string;
@@ -23,30 +26,13 @@ export default function SenderTemplatePicker({
     getTemplates().then(setTemplates);
   }, []);
 
-  const providerBadge = (provider: string) => {
-    if (provider === "resend")
-      return (
-        <span className="ml-1.5 text-[10px] font-medium bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-          Resend
-        </span>
-      );
-    return (
-      <span className="ml-1.5 text-[10px] font-medium bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-        SMTP
-      </span>
-    );
-  };
-
   return (
     <div className="grid grid-cols-2 gap-3">
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          Sender Email
-        </label>
-        <select
+      <div className="space-y-1.5">
+        <Label>Sender Email</Label>
+        <Select
           value={senderEmail}
           onChange={(e) => onSenderChange(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Select sender…</option>
           {senders.map((s) => (
@@ -55,30 +41,37 @@ export default function SenderTemplatePicker({
               {s.is_default ? " ★" : ""}
             </option>
           ))}
-        </select>
-        {senderEmail && senders.length > 0 && (() => {
-          const selected = senders.find((s) => s.email === senderEmail);
-          if (!selected) return null;
-          return (
-            <div className="mt-1 flex items-center">
-              {providerBadge(selected.provider)}
-              {selected.is_default && (
-                <span className="ml-1 text-[10px] font-medium bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                  Default
-                </span>
-              )}
-            </div>
-          );
-        })()}
+        </Select>
+        {senderEmail &&
+          senders.length > 0 &&
+          (() => {
+            const selected = senders.find((s) => s.email === senderEmail);
+            if (!selected) return null;
+            return (
+              <div className="mt-1 flex items-center gap-1">
+                <Badge
+                  variant={selected.provider === "resend" ? "secondary" : "default"}
+                  className="text-[10px] px-1.5 py-0"
+                >
+                  {selected.provider === "resend" ? "Resend" : "SMTP"}
+                </Badge>
+                {selected.is_default && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1.5 py-0 text-green-700 border-green-300"
+                  >
+                    Default
+                  </Badge>
+                )}
+              </div>
+            );
+          })()}
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          Template
-        </label>
-        <select
+      <div className="space-y-1.5">
+        <Label>Template</Label>
+        <Select
           value={templateFile}
           onChange={(e) => onTemplateChange(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Select template…</option>
           {templates.map((t) => (
@@ -86,7 +79,7 @@ export default function SenderTemplatePicker({
               {t.name}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     </div>
   );

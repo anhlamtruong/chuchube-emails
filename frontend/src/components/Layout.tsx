@@ -85,7 +85,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               Support Our Team
             </p>
             <p className="text-[10px] text-amber-700/70 mt-0.5 flex items-center gap-0.5">
-              Buy us a coffee <Heart size={8} className="inline fill-amber-400 text-amber-400" />
+              Buy us a coffee{" "}
+              <Heart
+                size={8}
+                className="inline fill-amber-400 text-amber-400"
+              />
             </p>
           </div>
         </a>
@@ -140,9 +144,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </Button>
           <div className="flex items-center gap-2">
             <Mail size={18} className="text-primary" />
-            <span className="font-semibold text-sm">
-              ChuChuBe Emails
-            </span>
+            <span className="font-semibold text-sm">ChuChuBe Emails</span>
           </div>
         </header>
 

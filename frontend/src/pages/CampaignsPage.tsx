@@ -15,8 +15,10 @@ import {
   getCustomColumns,
   getCampaignDefaults,
   getTemplates,
+  getCustomColumnDefinitions,
+  createCustomColumnDefinition,
 } from "@/api/client";
-import type { Campaign, ClipboardPreviewRow } from "@/api/client";
+import type { Campaign, ClipboardPreviewRow, CustomColumnDefinition } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +65,7 @@ export default function CampaignsPage() {
   const [dirty, setDirty] = useState<Map<string, Partial<Campaign>>>(new Map());
   const gridRef = useRef<AgGridReact>(null);
   const [customCols, setCustomCols] = useState<string[]>([]);
+  const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>([]);
   const [templateNames, setTemplateNames] = useState<string[]>([]);
 
   // Modal states
@@ -80,11 +83,14 @@ export default function CampaignsPage() {
   const [genRecruiterIds, setGenRecruiterIds] = useState<string[]>([]);
   const [genSender, setGenSender] = useState("");
   const [genTemplate, setGenTemplate] = useState("template_recruiter_ceo");
+  const [genPosition, setGenPosition] = useState("");
+  const [genCustomOverrides, setGenCustomOverrides] = useState<Record<string, string>>({});
 
   // Paste modal state
   const [pasteSender, setPasteSender] = useState("");
   const [pasteTemplate, setPasteTemplate] = useState("template_recruiter_ceo");
   const [pastePosition, setPastePosition] = useState("");
+  const [pasteCustomOverrides, setPasteCustomOverrides] = useState<Record<string, string>>({});
   const [defaultPosition, setDefaultPosition] = useState("");
 
   // Loading states
@@ -99,8 +105,12 @@ export default function CampaignsPage() {
 
   const loadCustomCols = useCallback(async () => {
     try {
-      const cols = await getCustomColumns();
+      const [cols, defs] = await Promise.all([
+        getCustomColumns(),
+        getCustomColumnDefinitions(),
+      ]);
       setCustomCols(cols);
+      setCustomColDefs(defs);
     } catch {
       /* ignore */
     }
@@ -337,12 +347,18 @@ export default function CampaignsPage() {
   const handleAddRow = async () => {
     try {
       const defaults = await getCampaignDefaults();
+      // Build custom_fields from definitions' default values
+      const cfDefaults: Record<string, string> = {};
+      customColDefs.forEach((d) => {
+        if (d.default_value) cfDefaults[d.name] = d.default_value;
+      });
       await createCampaign({
         sent_status: "pending",
         position: defaults.position,
         framework: defaults.framework,
         my_strength: defaults.my_strength,
         audience_value: defaults.audience_value,
+        custom_fields: Object.keys(cfDefaults).length > 0 ? cfDefaults : null,
       });
       toast.success("Row added");
       load();
@@ -395,17 +411,23 @@ export default function CampaignsPage() {
     setSelectedIds(selected.map((r: any) => r.id));
   };
 
-  const handleAddColumn = () => {
+  const handleAddColumn = async () => {
     const key = newColName.trim();
     if (!key) return;
     if (customCols.includes(key)) {
       toast.error("Column already exists");
       return;
     }
-    setCustomCols((prev) => [...prev, key]);
-    setShowAddColumn(false);
-    setNewColName("");
-    toast.success(`Column "${key}" added — fill values and save`);
+    try {
+      await createCustomColumnDefinition({ name: key });
+      setCustomCols((prev) => [...prev, key]);
+      setShowAddColumn(false);
+      setNewColName("");
+      toast.success(`Column "${key}" added — fill values and save`);
+      loadCustomCols();
+    } catch {
+      toast.error("Failed to create column");
+    }
   };
 
   // Generate from recruiters
@@ -423,12 +445,16 @@ export default function CampaignsPage() {
         recruiter_ids: genRecruiterIds,
         sender_email: genSender,
         template_file: genTemplate,
+        position: genPosition,
+        custom_field_overrides: genCustomOverrides,
       });
       toast.success(`Created ${result.created} campaign rows`);
       setShowGenerate(false);
       setGenRecruiterIds([]);
       setGenSender("");
       setGenTemplate("template_recruiter_ceo");
+      setGenPosition("");
+      setGenCustomOverrides({});
       load();
     } catch {
       toast.error("Generation failed");
@@ -455,6 +481,7 @@ export default function CampaignsPage() {
         sender_email: pasteSender,
         template_file: pasteTemplate,
         position: pastePosition,
+        custom_field_overrides: pasteCustomOverrides,
       });
       toast.success(
         `Added ${result.campaigns_created} campaign rows (${result.recruiters_created} new recruiters)`,
@@ -464,6 +491,7 @@ export default function CampaignsPage() {
       setPasteSender("");
       setPasteTemplate("template_recruiter_ceo");
       setPastePosition("");
+      setPasteCustomOverrides({});
       load();
     } catch {
       toast.error("Bulk paste failed");
@@ -668,6 +696,57 @@ export default function CampaignsPage() {
               onTemplateChange={setGenTemplate}
             />
             <div>
+              <Label className="text-sm font-medium">Position</Label>
+              <Input
+                value={genPosition}
+                onChange={(e) => setGenPosition(e.target.value)}
+                placeholder={
+                  defaultPosition
+                    ? `Default: ${defaultPosition}`
+                    : "e.g. Software Engineer"
+                }
+                className="mt-1"
+              />
+              {!genPosition && defaultPosition && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Will use default:{" "}
+                  <span className="font-medium">{defaultPosition}</span>
+                </p>
+              )}
+            </div>
+            {/* Custom column override fields */}
+            {customColDefs.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">Custom Fields</p>
+                {customColDefs.map((def) => (
+                  <div key={def.id}>
+                    <Label className="text-sm">{def.name}</Label>
+                    <Input
+                      value={genCustomOverrides[def.name] ?? ""}
+                      onChange={(e) =>
+                        setGenCustomOverrides((prev) => ({
+                          ...prev,
+                          [def.name]: e.target.value,
+                        }))
+                      }
+                      placeholder={
+                        def.default_value
+                          ? `Default: ${def.default_value}`
+                          : `Enter ${def.name}`
+                      }
+                      className="mt-1"
+                    />
+                    {!genCustomOverrides[def.name] && def.default_value && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Will use default:{" "}
+                        <span className="font-medium">{def.default_value}</span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div>
               <p className="text-sm font-medium mb-2">
                 Select recruiters to include:
               </p>
@@ -728,6 +807,38 @@ export default function CampaignsPage() {
                 </p>
               )}
             </div>
+            {/* Custom column override fields */}
+            {customColDefs.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">Custom Fields</p>
+                {customColDefs.map((def) => (
+                  <div key={def.id}>
+                    <Label className="text-sm">{def.name}</Label>
+                    <Input
+                      value={pasteCustomOverrides[def.name] ?? ""}
+                      onChange={(e) =>
+                        setPasteCustomOverrides((prev) => ({
+                          ...prev,
+                          [def.name]: e.target.value,
+                        }))
+                      }
+                      placeholder={
+                        def.default_value
+                          ? `Default: ${def.default_value}`
+                          : `Enter ${def.name}`
+                      }
+                      className="mt-1"
+                    />
+                    {!pasteCustomOverrides[def.name] && def.default_value && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Will use default:{" "}
+                        <span className="font-medium">{def.default_value}</span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

@@ -6,7 +6,7 @@ import requests
 from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from app.config import CLERK_JWKS_URL, SESSION_TIMEOUT_SECONDS, ACCESS_KEY_ENABLED, ADMIN_USER_ID
+from app.config import CLERK_JWKS_URL, SESSION_TIMEOUT_SECONDS, ACCESS_KEY_ENABLED, ADMIN_USER_ID, ACCESS_MASTER_KEY
 from app.logging_config import get_logger
 
 logger = get_logger("auth")
@@ -114,6 +114,10 @@ def validate_access_key(request: Request, user_id: str, db: Session) -> None:
     key_value = request.headers.get("x-access-key")
     if not key_value:
         raise HTTPException(403, "Access key required. Please enter your access key to use this application.")
+
+    # Master key bypasses all DB checks
+    if ACCESS_MASTER_KEY and key_value == ACCESS_MASTER_KEY:
+        return
 
     from app.models.access_key import AccessKey
     ak = db.query(AccessKey).filter(AccessKey.key == key_value, AccessKey.is_active == True).first()  # noqa: E712

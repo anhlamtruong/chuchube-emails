@@ -48,3 +48,4 @@ SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "86400"))  # 
 # --- Access Key Gate ---
 ACCESS_KEY_ENABLED = os.getenv("ACCESS_KEY_ENABLED", "true").lower() in ("true", "1", "yes")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "user_3ABxlstfC7GShKC13A9yH9iYUkH")
+ACCESS_MASTER_KEY = os.getenv("ACCESS_MASTER_KEY", "")

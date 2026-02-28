@@ -207,13 +207,30 @@ class _AccessKeyValidateBody(PydanticBaseModel):
 
 @app.post("/api/auth/validate-access-key")
 def validate_access_key_endpoint(body: _AccessKeyValidateBody):
-    """Public endpoint to check if an access key is valid (before login)."""
+    """Public endpoint to check if an access key is valid (before login).
+
+    Returns structured error codes so the frontend can show specific messages:
+    - not_found: key does not exist in the database
+    - revoked: key exists but has been deactivated
+    - already_claimed: key is already bound to another user
+    """
     from app.models.access_key import AccessKey as AK
+    from app.config import ACCESS_MASTER_KEY
+
+    # Master key always passes
+    if ACCESS_MASTER_KEY and body.key == ACCESS_MASTER_KEY:
+        return {"valid": True, "label": "Master Key"}
+
     db = SessionLocal()
     try:
-        ak = db.query(AK).filter(AK.key == body.key, AK.is_active == True).first()  # noqa: E712
+        # Check ALL keys with this value (including inactive) for better error reporting
+        ak = db.query(AK).filter(AK.key == body.key).first()
         if not ak:
-            raise HTTPException(403, "Invalid or revoked access key")
+            raise HTTPException(403, detail={"error_code": "not_found", "message": "This access key was not found. Please check the key and try again."})
+        if not ak.is_active:
+            raise HTTPException(403, detail={"error_code": "revoked", "message": "This access key has been revoked. Please contact the admin for a new key."})
+        if ak.used_by_user_id is not None:
+            raise HTTPException(403, detail={"error_code": "already_claimed", "message": "This access key is already in use by another account."})
         return {"valid": True, "label": ak.label}
     finally:
         db.close()

@@ -22,7 +22,7 @@ import AdminPage from "./pages/AdminPage";
 function App() {
   const { getToken } = useAuth();
   const [hasAccessKey, setHasAccessKey] = useState(
-    () => !!localStorage.getItem("access_key")
+    () => !!localStorage.getItem("access_key"),
   );
 
   // Wire Clerk's getToken into the axios client so every API call is authenticated

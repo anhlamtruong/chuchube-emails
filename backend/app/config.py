@@ -73,6 +73,24 @@ except ValueError:
     BOUNCE_CHECK_INTERVAL = 300
 BOUNCE_CHECK_ENABLED = os.getenv("BOUNCE_CHECK_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# --- Backup ---
+# BACKUP_DATABASE_URL: Direct Supabase connection (port 5432, NOT the PgBouncer pooler).
+#   PgBouncer's transaction mode is incompatible with pg_dump.
+#   Format: postgresql://user:pass@db.<project>.supabase.co:5432/postgres
+BACKUP_DATABASE_URL = os.getenv("BACKUP_DATABASE_URL", "")
+# LOCAL_DB_URL: Target local PostgreSQL instance for restoring backups.
+LOCAL_DB_URL = os.getenv("LOCAL_DB_URL", "")
+# BACKUP_CRON: Cron expression for scheduled backups (default: daily at 3 AM UTC).
+BACKUP_CRON = os.getenv("BACKUP_CRON", "0 3 * * *")
+# BACKUP_RETENTION_DAYS: How many days to keep old backup files.
+try:
+    BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "7"))
+except ValueError:
+    _config_logger.warning("Invalid BACKUP_RETENTION_DAYS, falling back to 7")
+    BACKUP_RETENTION_DAYS = 7
+# BACKUP_ENCRYPTION_KEY: GPG passphrase for at-rest encryption (leave empty to disable).
+BACKUP_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+
 
 def validate_config() -> None:
     """Check that critical configuration values are present and warn on gaps.

@@ -30,6 +30,7 @@ from app.models.bounce_log import BounceLog  # noqa: F401 – register model
 from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs, custom_columns
 from app.routers import admin as admin_router
 from app.routers import bounces as bounces_router
+from app.routers import backup as backup_router
 from app.background import start_scheduler, stop_scheduler
 from app.rate_limit import limiter
 
@@ -157,6 +158,7 @@ app.include_router(audit_logs.router, dependencies=[Depends(require_auth)])
 app.include_router(custom_columns.router, dependencies=[Depends(require_auth)])
 app.include_router(admin_router.router, dependencies=[Depends(require_auth)])
 app.include_router(bounces_router.router, dependencies=[Depends(require_auth)])
+app.include_router(backup_router.router, dependencies=[Depends(require_auth)])
 # SSE endpoint uses query-param auth (EventSource can't set headers)
 app.include_router(bounces_router.sse_router)
 app.include_router(emails.sse_router)

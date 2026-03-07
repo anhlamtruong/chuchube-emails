@@ -1,3 +1,9 @@
 venv
 .env
 ./sending_email/__pycache__.env
+
+# Backup files (contain production data — never commit)
+backups/
+*.dump
+*.dump.gpg
+exports/

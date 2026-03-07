@@ -24,6 +24,14 @@ echo "=== Health check ==="
 curl -sf http://localhost:8000/api/health && echo " ✓ Backend OK" || echo " ✗ Backend failed"
 
 echo ""
+echo "=== Backup container status ==="
+if docker compose ps backup --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; then
+    echo "  ✓ Backup container running"
+else
+    echo "  ⚠ Backup container not running (check BACKUP_DATABASE_URL in .env)"
+fi
+
+echo ""
 echo "=== Container status ==="
 docker compose ps
 

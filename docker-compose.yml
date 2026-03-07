@@ -10,6 +10,8 @@ services:
       - OLLAMA_URL=http://ollama:11434
     volumes:
       - ./sending_email/assets:/app/sending_email/assets
+      # Shared backup volume — backend needs write access for .trigger file
+      - ./backups:/backups
     # Backend not exposed publicly — frontend proxies via nginx
     expose:
       - "8000"
@@ -78,6 +80,40 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # ─── Automated Backup (pg_dump cron) ──────────────────────────────────
+  # Uses the direct Supabase connection (port 5432, NOT the PgBouncer pooler)
+  # to run pg_dump on a configurable cron schedule.
+  # Backup files are stored in ./backups on the host.
+  backup:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    container_name: chuchube-emails-backup
+    env_file: .env
+    environment:
+      - BACKUP_DATABASE_URL=${BACKUP_DATABASE_URL}
+      - BACKUP_CRON=${BACKUP_CRON:-0 3 * * *}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
+      - BACKUP_DIR=/backups
+    volumes:
+      # Backup files persisted on host — NOT mounted into frontend/backend
+      - ./backups:/backups
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /backups/backup_state.json || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
 volumes:
   ollama_data:

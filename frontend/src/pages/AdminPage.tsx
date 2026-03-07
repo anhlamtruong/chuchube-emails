@@ -79,9 +79,11 @@ export default function AdminPage() {
           <TabsTrigger value="ooo-management" className="gap-1.5">
             <CalendarX2 size={14} /> OOO Management
           </TabsTrigger>
-          <TabsTrigger value="admin-jobs" className="gap-1.5">
-            <Briefcase size={14} /> All Jobs
-          </TabsTrigger>
+          {adminRole === "master_admin" && (
+            <TabsTrigger value="admin-jobs" className="gap-1.5">
+              <Briefcase size={14} /> All Jobs
+            </TabsTrigger>
+          )}
           {adminRole === "master_admin" && (
             <TabsTrigger value="users-roles" className="gap-1.5">
               <Users size={14} /> Users & Roles
@@ -109,9 +111,11 @@ export default function AdminPage() {
           <OooManagementTab />
         </TabsContent>
 
-        <TabsContent value="admin-jobs" className="mt-4">
-          <AdminJobsTab />
-        </TabsContent>
+        {adminRole === "master_admin" && (
+          <TabsContent value="admin-jobs" className="mt-4">
+            <AdminJobsTab />
+          </TabsContent>
+        )}
 
         {adminRole === "master_admin" && (
           <TabsContent value="users-roles" className="mt-4">

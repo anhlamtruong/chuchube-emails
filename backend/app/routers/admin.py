@@ -318,7 +318,7 @@ def admin_list_jobs(
     date_to: str | None = Query(None, description="Filter to date (ISO)"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    auth: dict = Depends(require_admin),
+    auth: dict = Depends(require_master_admin),
     db: Session = Depends(get_db),
 ):
     """List all jobs across all users with filters. Admin only.
@@ -414,7 +414,7 @@ def admin_list_jobs(
 @router.delete("/jobs/{job_id}")
 def admin_cancel_job(
     job_id: str,
-    auth: dict = Depends(require_admin),
+    auth: dict = Depends(require_master_admin),
     db: Session = Depends(get_db),
 ):
     """Cancel any job (admin-level). No ownership check."""

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { Toaster } from "sonner";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 import App from "./App.tsx";
 
@@ -12,13 +13,20 @@ if (!PUBLISHABLE_KEY) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY env variable");
 }
 
+// Global safety net for unhandled promise rejections
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("[Unhandled Rejection]", event.reason);
+});
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-      <BrowserRouter>
-        <App />
-        <Toaster position="top-right" richColors closeButton />
-      </BrowserRouter>
-    </ClerkProvider>
+    <ErrorBoundary>
+      <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+        <BrowserRouter>
+          <App />
+          <Toaster position="top-right" richColors closeButton />
+        </BrowserRouter>
+      </ClerkProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

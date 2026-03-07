@@ -9,7 +9,7 @@ export default function LoginPage() {
         </h1>
         <SignIn
           routing="hash"
-          afterSignInUrl="/"
+          fallbackRedirectUrl="/"
           appearance={{
             elements: {
               rootBox: "mx-auto",

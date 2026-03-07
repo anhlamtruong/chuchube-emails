@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import {
   getDocuments,
   uploadDocument,
@@ -24,6 +25,7 @@ import {
   TableRow,
   TableCell,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -59,9 +61,11 @@ function formatBytes(bytes: number) {
 }
 
 export default function DocumentsPage() {
+  usePageTitle("Documents");
   const [activeScope, setActiveScope] = useState<Scope>("global");
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [scopeRef, setScopeRef] = useState("");
+  const [loading, setLoading] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string;
@@ -70,10 +74,16 @@ export default function DocumentsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const params: Record<string, string> = { scope: activeScope };
-    if (scopeRef && activeScope !== "global") params.scope_ref = scopeRef;
-    const data = await getDocuments(params);
-    setDocs(data);
+    try {
+      const params: Record<string, string> = { scope: activeScope };
+      if (scopeRef && activeScope !== "global") params.scope_ref = scopeRef;
+      const data = await getDocuments(params);
+      setDocs(data);
+    } catch {
+      toast.error("Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
   }, [activeScope, scopeRef]);
 
   useEffect(() => {
@@ -230,7 +240,44 @@ export default function DocumentsPage() {
       {/* File List */}
       <Card>
         <CardContent className="p-0">
-          {docs.length === 0 ? (
+          {loading ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>File</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Scope Ref</TableHead>
+                  <TableHead>Uploaded</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <TableRow key={`skel-${i}`}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-12" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-12 ml-auto" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : docs.length === 0 ? (
             <div className="p-12 text-center">
               <FileText
                 size={48}

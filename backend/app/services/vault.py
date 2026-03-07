@@ -43,11 +43,9 @@ def store_secret(
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
-        db.commit()
         logger.info(f"Stored vault secret: {name}")
         return str(secret_id) if secret_id else None
     except Exception as e:
-        db.rollback()
         logger.error(f"Failed to store vault secret {name}: {e}")
         raise
 
@@ -77,7 +75,6 @@ def get_secret(
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
-            db.commit()
         return row[0] if row else None
     except Exception as e:
         logger.error(f"Failed to retrieve vault secret {name}: {e}")
@@ -109,11 +106,9 @@ def update_secret(
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
-        db.commit()
         logger.info(f"Updated vault secret: {name}")
         return True
     except Exception as e:
-        db.rollback()
         logger.error(f"Failed to update vault secret {name}: {e}")
         raise
 
@@ -142,10 +137,8 @@ def delete_secret(
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
-        db.commit()
         logger.info(f"Deleted vault secret: {name}")
         return True
     except Exception as e:
-        db.rollback()
         logger.error(f"Failed to delete vault secret {name}: {e}")
         raise

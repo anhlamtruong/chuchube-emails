@@ -7,15 +7,24 @@ interface AlertDialogProps {
   children: React.ReactNode;
 }
 
-function AlertDialog({
-  open,
-  onOpenChange: _onOpenChange,
-  children,
-}: AlertDialogProps) {
-  void _onOpenChange;
+function AlertDialog({ open, onOpenChange, children }: AlertDialogProps) {
+  // Close on Escape key (alert dialogs are intentionally non-dismissible
+  // via backdrop click, but Escape is standard UX)
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onOpenChange(false);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onOpenChange]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" role="alertdialog" aria-modal="true">
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
         {children}

@@ -1,10 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getDashboard } from "@/api/client";
+import { usePageTitle } from "@/hooks/usePageTitle";
+import { useJobSSE } from "@/hooks/useJobSSE";
+import type { JobUpdateEvent } from "@/hooks/useJobSSE";
+import StatusDot from "@/components/StatusDot";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import {
   Users,
   Table,
@@ -13,7 +18,9 @@ import {
   Plus,
   Upload,
   Calendar,
+  ArrowUpRight,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface UpcomingJob {
   job_id: string;
@@ -31,12 +38,53 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
+  usePageTitle("Dashboard");
   const [data, setData] = useState<DashboardData | null>(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    getDashboard().then(setData);
+  const load = useCallback(() => {
+    getDashboard()
+      .then(setData)
+      .catch(() => toast.error("Failed to load dashboard"));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // SSE: live job updates on dashboard
+  const hasActive = (data?.upcoming_jobs ?? []).some((j) =>
+    ["running", "queued", "scheduled"].includes(j.status),
+  );
+
+  const handleJobUpdate = useCallback((evt: JobUpdateEvent) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        upcoming_jobs: (prev.upcoming_jobs ?? []).map((j) =>
+          j.job_id === evt.job_id
+            ? { ...j, status: evt.status, sent: evt.sent }
+            : j,
+        ),
+      };
+    });
+  }, []);
+
+  const handleJobFinished = useCallback(
+    (evt: JobUpdateEvent) => {
+      handleJobUpdate(evt);
+      // Reload dashboard to get updated stats
+      setTimeout(load, 500);
+    },
+    [handleJobUpdate, load],
+  );
+
+  useJobSSE({
+    enabled: hasActive,
+    onJobUpdate: handleJobUpdate,
+    onJobFinished: handleJobFinished,
+  });
 
   if (!data) {
     return (
@@ -160,36 +208,54 @@ export default function DashboardPage() {
 
         {/* Upcoming Scheduled Jobs */}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
               <Calendar size={16} /> Upcoming Jobs
             </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate("/scheduled-jobs")}
+              className="text-xs"
+            >
+              View all <ArrowUpRight size={12} />
+            </Button>
           </CardHeader>
           <CardContent>
             {(data.upcoming_jobs ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground">No scheduled jobs</p>
             ) : (
               <div className="space-y-2">
-                {data.upcoming_jobs!.map((job) => (
-                  <div
-                    key={job.job_id}
-                    className="flex items-center justify-between p-2 bg-muted rounded-lg"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">
-                        Job #{job.job_id} — {job.total} email(s)
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {job.created_at
-                          ? new Date(job.created_at).toLocaleString()
-                          : "—"}
-                      </p>
+                {data.upcoming_jobs!.map((job) => {
+                  const pct = job.total > 0 ? (job.sent / job.total) * 100 : 0;
+                  return (
+                    <div
+                      key={job.job_id}
+                      className="flex items-center justify-between p-2 bg-muted rounded-lg cursor-pointer hover:bg-muted/80 transition-colors"
+                      onClick={() => navigate(`/scheduled-jobs/${job.job_id}`)}
+                    >
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <StatusDot status={job.status} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {job.total} email{job.total !== 1 ? "s" : ""}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {job.created_at
+                              ? new Date(job.created_at).toLocaleString()
+                              : "—"}
+                          </p>
+                          {job.status === "running" && (
+                            <Progress value={pct} className="h-1 mt-1" />
+                          )}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="capitalize ml-2">
+                        {job.status}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="capitalize">
-                      {job.status}
-                    </Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

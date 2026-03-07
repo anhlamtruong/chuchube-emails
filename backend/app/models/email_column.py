@@ -26,11 +26,11 @@ class EmailColumn(Base):
     recruiter_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("recruiters.id", ondelete="SET NULL"), nullable=True
     )
-    recruiter = relationship("Recruiter", backref="email_columns", lazy="joined")
+    recruiter = relationship("Recruiter", backref="email_columns", lazy="select")
     referral_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("referrals.id", ondelete="SET NULL"), nullable=True
     )
-    referral = relationship("Referral", backref="email_columns", lazy="joined")
+    referral = relationship("Referral", backref="email_columns", lazy="select")
     user_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

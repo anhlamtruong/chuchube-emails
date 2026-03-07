@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { AgGridReact } from "ag-grid-react";
+import { usePageTitle } from "@/hooks/usePageTitle";
+import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import type { ColDef, CellValueChangedEvent } from "ag-grid-community";
 import {
@@ -64,11 +66,13 @@ import SenderTemplatePicker from "@/components/SenderTemplatePicker";
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function CampaignsPage() {
+  usePageTitle("Campaigns");
   const [rows, setRows] = useState<Campaign[]>([]);
   const rowsRef = useRef<Campaign[]>(rows);
   rowsRef.current = rows;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [dirty, setDirty] = useState<Map<string, Partial<Campaign>>>(new Map());
+  useUnsavedChangesWarning(dirty.size > 0);
   const gridRef = useRef<AgGridReact>(null);
   const [customCols, setCustomCols] = useState<string[]>([]);
   const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>(
@@ -110,6 +114,7 @@ export default function CampaignsPage() {
   const [defaultPosition, setDefaultPosition] = useState("");
 
   // Loading states
+  const [initialLoading, setInitialLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [pasting, setPasting] = useState(false);
 
@@ -127,8 +132,8 @@ export default function CampaignsPage() {
       ]);
       setCustomCols(cols);
       setCustomColDefs(defs);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.warn("[CampaignsPage] Failed to load custom columns:", e);
     }
   }, []);
 
@@ -136,8 +141,8 @@ export default function CampaignsPage() {
     try {
       const tpls = await getTemplates();
       setTemplateNames(["", ...tpls.map((t) => t.name)]);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.warn("[CampaignsPage] Failed to load templates:", e);
     }
   }, []);
 
@@ -145,23 +150,29 @@ export default function CampaignsPage() {
     try {
       const d = await getCampaignDefaults();
       setDefaultPosition(d.position);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.warn("[CampaignsPage] Failed to load defaults:", e);
     }
   }, []);
 
   const load = useCallback(async () => {
-    const { items, total: t } = await getCampaigns({
-      page: 1,
-      per_page: PER_PAGE,
-    });
-    setRows(items);
-    setTotal(t);
-    setPage(1);
-    setDirty(new Map());
-    loadCustomCols();
-    loadTemplates();
-    loadDefaults();
+    try {
+      const { items, total: t } = await getCampaigns({
+        page: 1,
+        per_page: PER_PAGE,
+      });
+      setRows(items);
+      setTotal(t);
+      setPage(1);
+      setDirty(new Map());
+      loadCustomCols();
+      loadTemplates();
+      loadDefaults();
+    } catch {
+      toast.error("Failed to load campaigns");
+    } finally {
+      setInitialLoading(false);
+    }
   }, [loadCustomCols, loadTemplates, loadDefaults]);
 
   const loadMore = useCallback(async () => {
@@ -174,6 +185,8 @@ export default function CampaignsPage() {
       });
       setRows((prev) => [...prev, ...items]);
       setPage(nextPage);
+    } catch {
+      toast.error("Failed to load more campaigns");
     } finally {
       setLoadingMore(false);
     }
@@ -270,7 +283,7 @@ export default function CampaignsPage() {
       editable: true,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: {
-        values: ["pending", "sent", "response", "failed"],
+        values: ["pending", "sent", "response", "failed", "ooo"],
       },
       cellStyle: (params) => {
         const colors: Record<string, string> = {
@@ -278,6 +291,7 @@ export default function CampaignsPage() {
           pending: "#fef9c3",
           failed: "#fee2e2",
           response: "#dbeafe",
+          ooo: "#e0f2fe",
         };
         return { backgroundColor: colors[params.value] || "" };
       },
@@ -601,6 +615,7 @@ export default function CampaignsPage() {
       >
         <AgGridReact
           ref={gridRef}
+          loading={initialLoading}
           rowData={flatRows}
           columnDefs={columnDefs}
           defaultColDef={{
@@ -743,8 +758,11 @@ export default function CampaignsPage() {
               onTemplateChange={setGenTemplate}
             />
             <div>
-              <Label className="text-sm font-medium">Position</Label>
+              <Label htmlFor="gen-position" className="text-sm font-medium">
+                Position
+              </Label>
               <Input
+                id="gen-position"
                 value={genPosition}
                 onChange={(e) => setGenPosition(e.target.value)}
                 placeholder={

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { NavLink, Link } from "react-router-dom";
 import { UserButton } from "@clerk/clerk-react";
 import { cn } from "@/lib/utils";
+import { useScrollToTop } from "@/hooks/useScrollToTop";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
@@ -34,7 +35,13 @@ const navItems = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-function SidebarContent({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin?: boolean }) {
+function SidebarContent({
+  onNavigate,
+  isAdmin,
+}: {
+  onNavigate?: () => void;
+  isAdmin?: boolean;
+}) {
   return (
     <>
       <div className="p-5 border-b border-sidebar-border">
@@ -128,6 +135,7 @@ function SidebarContent({ onNavigate, isAdmin }: { onNavigate?: () => void; isAd
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  useScrollToTop();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -152,7 +160,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onClick={() => setMobileOpen(false)}
           />
           <aside className="fixed left-0 top-0 bottom-0 w-72 bg-sidebar border-r border-sidebar-border flex flex-col z-50">
-            <SidebarContent onNavigate={() => setMobileOpen(false)} isAdmin={isAdmin} />
+            <SidebarContent
+              onNavigate={() => setMobileOpen(false)}
+              isAdmin={isAdmin}
+            />
           </aside>
         </div>
       )}

@@ -11,8 +11,37 @@ from app.schemas.template import (
     TemplatePreviewRequest,
 )
 from app.services.template_handler import safe_substitute
+import nh3
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
+
+# nh3 allowed tags for email HTML templates
+_NH3_TAGS = {
+    "a", "abbr", "b", "blockquote", "br", "code", "div", "em",
+    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "li",
+    "ol", "p", "pre", "small", "span", "strong", "sub", "sup",
+    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
+    "center", "font", "section", "header", "footer", "main", "article",
+}
+_NH3_ATTRS: dict = {
+    "*": {"class", "style", "id", "align", "valign", "width", "height", "bgcolor", "border", "cellpadding", "cellspacing"},
+    "a": {"href", "target"},
+    "img": {"src", "alt", "title", "cid", "width", "height"},
+    "td": {"colspan", "rowspan", "width", "height", "align", "valign", "bgcolor", "style"},
+    "th": {"colspan", "rowspan", "width", "height", "align", "valign", "bgcolor", "style"},
+    "table": {"width", "border", "cellpadding", "cellspacing", "bgcolor", "style"},
+    "font": {"color", "size", "face"},
+}
+
+
+def _sanitize_html(html: str) -> str:
+    """Sanitize HTML using nh3, preserving safe email template tags."""
+    return nh3.clean(
+        html,
+        tags=_NH3_TAGS,
+        attributes=_NH3_ATTRS,
+        link_rel="noopener",
+    )
 
 
 @router.get("/", response_model=list[TemplateOut])
@@ -52,7 +81,11 @@ def create_template(data: TemplateCreate, auth: dict = Depends(require_auth), db
         db.query(Template).filter(
             Template.user_id == uid, Template.is_default == True  # noqa: E712
         ).update({"is_default": False})
-    t = Template(**data.model_dump(), user_id=uid)
+    dump = data.model_dump()
+    # Sanitize HTML body on save
+    if dump.get("body_html"):
+        dump["body_html"] = _sanitize_html(dump["body_html"])
+    t = Template(**dump, user_id=uid)
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -78,6 +111,9 @@ def update_template(template_id: str, data: TemplateUpdate, auth: dict = Depends
             Template.id != template_id,
         ).update({"is_default": False})
     for key, val in update_data.items():
+        # Sanitize HTML body on update
+        if key == "body_html" and val:
+            val = _sanitize_html(val)
         setattr(t, key, val)
     db.commit()
     db.refresh(t)
@@ -98,9 +134,9 @@ def set_template_default(template_id: str, auth: dict = Depends(require_auth), d
     if t.is_default:
         t.is_default = False
     else:
-        # Clear any existing default for this user (including system templates marked as default by this user)
+        # Clear any existing default for this user only (do NOT touch system templates)
         db.query(Template).filter(
-            or_(Template.user_id == uid, Template.user_id.is_(None)),
+            Template.user_id == uid,
             Template.is_default == True,  # noqa: E712
         ).update({"is_default": False}, synchronize_session="fetch")
         t.is_default = True

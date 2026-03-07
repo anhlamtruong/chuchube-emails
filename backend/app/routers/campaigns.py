@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
@@ -14,6 +14,7 @@ from app.schemas.email_column import (
     EmailColumnBulkUpdate,
     EmailColumnOut,
 )
+from app.rate_limit import limiter
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -32,18 +33,25 @@ def get_custom_columns(auth: dict = Depends(require_auth), db: Session = Depends
     keys: list[str] = [d.name for d in definitions]
     defined_set = set(keys)
 
-    # Also scan existing rows for any undeclared keys
-    from sqlalchemy import or_  # noqa: E811
-    rows = db.query(EmailColumn.custom_fields).filter(
-        or_(EmailColumn.user_id == uid, EmailColumn.user_id.is_(None)),
-        EmailColumn.custom_fields.isnot(None),
-    ).all()
-    for (cf,) in rows:
-        if isinstance(cf, dict):
-            for k in cf.keys():
-                if k not in defined_set:
-                    keys.append(k)
-                    defined_set.add(k)
+    # Use PostgreSQL json_object_keys to extract undeclared keys in SQL
+    # instead of loading every row's JSON into Python.
+    # Guard: json_typeof filters out JSON nulls/arrays/scalars that crash json_object_keys.
+    from sqlalchemy import text, or_  # noqa: E811
+    try:
+        stmt = text("""
+            SELECT DISTINCT k
+            FROM email_columns, json_object_keys(custom_fields) AS k
+            WHERE (user_id = :uid OR user_id IS NULL)
+              AND custom_fields IS NOT NULL
+              AND json_typeof(custom_fields) = 'object'
+        """)
+        extra_keys = db.execute(stmt, {"uid": uid}).scalars().all()
+    except Exception:
+        extra_keys = []
+    for k in sorted(extra_keys):
+        if k not in defined_set:
+            keys.append(k)
+            defined_set.add(k)
     return {"columns": keys}
 
 
@@ -58,14 +66,7 @@ def list_campaigns(
     db: Session = Depends(get_db),
 ):
     uid = get_user_id(auth)
-    # Claim any orphaned rows (pre-migration data with user_id=NULL)
     from sqlalchemy import or_  # noqa: E811
-    orphans = db.query(EmailColumn).filter(EmailColumn.user_id.is_(None)).count()
-    if orphans:
-        db.query(EmailColumn).filter(EmailColumn.user_id.is_(None)).update(
-            {EmailColumn.user_id: uid}, synchronize_session=False
-        )
-        db.commit()
     q = db.query(EmailColumn).filter(EmailColumn.user_id == uid)
     if search:
         term = f"%{search}%"
@@ -115,7 +116,8 @@ def get_campaign(row_id: str, auth: dict = Depends(require_auth), db: Session = 
 
 
 @router.post("/", response_model=EmailColumnOut, status_code=201)
-def create_campaign(data: EmailColumnCreate, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def create_campaign(request: Request, data: EmailColumnCreate, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     uid = get_user_id(auth)
     r = EmailColumn(**data.model_dump(), user_id=uid)
     db.add(r)
@@ -140,12 +142,19 @@ def update_campaign(row_id: str, data: EmailColumnUpdate, auth: dict = Depends(r
 
 
 @router.put("/bulk/update")
-def bulk_update_campaigns(rows: list[EmailColumnBulkUpdate], auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+def bulk_update_campaigns(request: Request, rows: list[EmailColumnBulkUpdate], auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     uid = get_user_id(auth)
+    # Pre-load all rows in one query instead of N individual fetches
+    row_ids = [item.id for item in rows]
+    existing = db.query(EmailColumn).filter(
+        EmailColumn.id.in_(row_ids), EmailColumn.user_id == uid
+    ).all()
+    existing_map = {str(r.id): r for r in existing}
     updated = 0
     for item in rows:
-        r = db.query(EmailColumn).get(item.id)
-        if not r or r.user_id != uid:
+        r = existing_map.get(str(item.id))
+        if not r:
             continue
         for key, val in item.model_dump(exclude_unset=True, exclude={"id"}).items():
             setattr(r, key, val)
@@ -167,11 +176,16 @@ def delete_campaign(row_id: str, auth: dict = Depends(require_auth), db: Session
     return {"ok": True}
 
 
-@router.delete("/bulk/delete")
-def bulk_delete_campaigns(ids: list[str], auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+class BulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+@router.post("/bulk/delete")
+@limiter.limit("20/minute")
+def bulk_delete_campaigns(request: Request, body: BulkDeleteRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     uid = get_user_id(auth)
     deleted = db.query(EmailColumn).filter(
-        EmailColumn.id.in_(ids), EmailColumn.user_id == uid
+        EmailColumn.id.in_(body.ids), EmailColumn.user_id == uid
     ).delete(synchronize_session=False)
     db.commit()
     return {"deleted": deleted}
@@ -188,10 +202,15 @@ class GenerateFromRecruitersRequest(BaseModel):
 
 
 @router.post("/generate-from-recruiters")
-def generate_from_recruiters(req: GenerateFromRecruitersRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
-    """Create campaign rows from selected recruiter IDs."""
+@limiter.limit("10/minute")
+def generate_from_recruiters(request: Request, req: GenerateFromRecruitersRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Create campaign rows from selected recruiter IDs (excludes bounced)."""
     uid = get_user_id(auth)
-    recruiters = db.query(Recruiter).filter(Recruiter.id.in_(req.recruiter_ids)).all()
+    recruiters = db.query(Recruiter).filter(
+        Recruiter.id.in_(req.recruiter_ids),
+        Recruiter.email_status != "bounced",
+        Recruiter.approval_status == "approved",
+    ).all()
     defaults = get_campaign_defaults(db, uid)
     position = req.position.strip() if req.position.strip() else defaults["position"]
     # Build custom_fields: definition defaults merged with overrides
@@ -231,10 +250,15 @@ class GenerateFromReferralsRequest(BaseModel):
 
 
 @router.post("/generate-from-referrals")
-def generate_from_referrals(req: GenerateFromReferralsRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
-    """Create campaign rows from selected referral IDs."""
+@limiter.limit("10/minute")
+def generate_from_referrals(request: Request, req: GenerateFromReferralsRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Create campaign rows from selected referral IDs (excludes bounced)."""
     uid = get_user_id(auth)
-    referrals = db.query(Referral).filter(Referral.id.in_(req.referral_ids)).all()
+    referrals = db.query(Referral).filter(
+        Referral.id.in_(req.referral_ids),
+        Referral.email_status != "bounced",
+        Referral.approval_status == "approved",
+    ).all()
     defaults = get_campaign_defaults(db, uid)
     position = req.position.strip() if req.position.strip() else defaults["position"]
     # Build custom_fields: definition defaults merged with overrides
@@ -283,7 +307,8 @@ class BulkPasteRequest(BaseModel):
 
 
 @router.post("/bulk-paste")
-def bulk_paste_campaigns(req: BulkPasteRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def bulk_paste_campaigns(request: Request, req: BulkPasteRequest, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """
     Paste CSV rows → upsert into Recruiters + create Campaign rows.
     If a recruiter email already exists, link to the existing one.
@@ -296,6 +321,9 @@ def bulk_paste_campaigns(req: BulkPasteRequest, auth: dict = Depends(require_aut
     # Build custom_fields: definition defaults merged with overrides
     cf_defaults = get_custom_column_defaults(db, uid)
     custom_fields = {**cf_defaults, **{k: v for k, v in req.custom_field_overrides.items() if v.strip()}} if cf_defaults or req.custom_field_overrides else None
+
+    from app.auth import get_user_role, is_admin_role
+    approval = "approved" if is_admin_role(get_user_role(uid, db)) else "pending"
 
     for row in req.rows:
         email = row.email.strip()
@@ -315,6 +343,8 @@ def bulk_paste_campaigns(req: BulkPasteRequest, auth: dict = Depends(require_aut
                 title=row.title.strip(),
                 location=row.location.strip(),
                 notes=row.notes.strip(),
+                user_id=uid,
+                approval_status=approval,
             )
             db.add(recruiter)
             db.flush()

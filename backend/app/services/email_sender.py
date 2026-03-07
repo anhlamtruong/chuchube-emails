@@ -108,19 +108,20 @@ def send_email_resend(
     html_body: str,
     attachments: list | None = None,
 ) -> dict:
-    """Send an email via the Resend API.
+    """Send an email via the Resend HTTP API (no global state).
+
+    Uses httpx directly instead of the resend SDK to avoid setting a
+    global `resend.api_key` which is not thread-safe.
 
     `attachments` is a list of (bytes, display_name, mime_type) tuples.
     Returns the Resend API response dict.
     """
-    import resend
+    import httpx
     import base64
-
-    resend.api_key = api_key
 
     from_addr = f"{from_name} <{from_email}>" if from_name else from_email
 
-    params: dict = {
+    payload: dict = {
         "from": from_addr,
         "to": [to_email],
         "subject": subject,
@@ -134,10 +135,90 @@ def send_email_resend(
                 file_bytes, display_name, _mime = item
                 resend_attachments.append({
                     "filename": display_name,
-                    "content": list(file_bytes),
+                    "content": base64.b64encode(file_bytes).decode("ascii"),
                 })
         if resend_attachments:
-            params["attachments"] = resend_attachments
+            payload["attachments"] = resend_attachments
 
-    result = resend.Emails.send(params)
-    return result
+    resp = httpx.post(
+        "https://api.resend.com/emails",
+        json=payload,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def send_access_key_notification(
+    recipient_email: str,
+    access_key: str,
+    role: str,
+    assigned_by: str = "System Admin",
+) -> bool:
+    """Send an access key notification email via SMTP.
+
+    Uses the first default sender account's credentials from the DB.
+    Returns True on success, False on failure (logs the error).
+    """
+    from app.logging_config import get_logger
+
+    logger = get_logger("email_notification")
+
+    # Look up the first default sender account's credentials from DB
+    try:
+        from app.database import SessionLocal
+        from app.models.sender_account import SenderAccount
+        from app.services.vault import get_secret
+
+        db = SessionLocal()
+        try:
+            sender = (
+                db.query(SenderAccount)
+                .filter(SenderAccount.is_default.is_(True))
+                .order_by(SenderAccount.created_at.asc())
+                .first()
+            )
+            if not sender:
+                logger.warning("No default sender account found — skipping access key notification")
+                return False
+            sender_email = sender.email
+            sender_password = get_secret(sender.vault_secret_name)
+            if not sender_password:
+                logger.warning("No password found in vault for sender %s", sender_email)
+                return False
+            smtp_host = sender.smtp_host or "smtp.gmail.com"
+            smtp_port = sender.smtp_port or 465
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Failed to fetch sender account for notification: {e}")
+        return False
+
+    subject = "Your Access Key for ChuChube Emails"
+    body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2563eb;">Welcome to ChuChobe Emails!</h2>
+        <p>You have been granted <strong>{role}</strong> access.</p>
+        <p>Here is your access key:</p>
+        <div style="background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0; text-align: center;">
+            <code style="font-size: 18px; letter-spacing: 2px; color: #1e40af; font-weight: bold;">{access_key}</code>
+        </div>
+        <p style="color: #dc2626; font-weight: bold;">⚠️ Save this key now — it cannot be retrieved later.</p>
+        <p>Enter this key when prompted after signing in with your Clerk account.</p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+        <p style="color: #64748b; font-size: 12px;">Assigned by: {assigned_by}</p>
+    </body>
+    </html>
+    """
+
+    try:
+        server = login_to_server(smtp_host, smtp_port, sender_email, sender_password)
+        send_email(server, sender_email, recipient_email, subject, body)
+        server.quit()
+        logger.info(f"Access key notification sent to {recipient_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send access key notification to {recipient_email}: {e}")
+        return False

@@ -1,5 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import DOMPurify from "dompurify";
+import { usePageTitle } from "@/hooks/usePageTitle";
+import { useUnsavedChangesWarning } from "@/hooks/useUnsavedChangesWarning";
 import Editor from "@monaco-editor/react";
 import {
   getTemplates,
@@ -32,7 +35,7 @@ import {
   AlertDialogTitle,
   AlertDialogDescription,
 } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, Eye, Save, Lock, Star } from "lucide-react";
+import { Plus, Trash2, Eye, Save, Lock, Star, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const BUILT_IN_PLACEHOLDERS = [
@@ -49,6 +52,7 @@ const BUILT_IN_PLACEHOLDERS = [
 ];
 
 export default function TemplatesPage() {
+  usePageTitle("Templates");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selected, setSelected] = useState<Template | null>(null);
   const [subjectLine, setSubjectLine] = useState("");
@@ -60,26 +64,51 @@ export default function TemplatesPage() {
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
+  useUnsavedChangesWarning(hasChanges);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [discardTarget, setDiscardTarget] = useState<Template | null>(null);
   const [customColDefs, setCustomColDefs] = useState<CustomColumnDefinition[]>(
     [],
   );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const myTemplates = templates.filter((t) => (t as any).user_id);
   const systemTemplates = templates.filter((t) => !(t as any).user_id);
 
-  const load = async () => {
-    const data = await getTemplates();
-    setTemplates(data);
-  };
+  const load = useCallback(async () => {
+    try {
+      const data = await getTemplates();
+      setTemplates(data);
+    } catch {
+      toast.error("Failed to load templates");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     load();
     getCustomColumnDefinitions()
       .then(setCustomColDefs)
       .catch(() => {});
-  }, []);
+  }, [load]);
+
+  // Ctrl+S / Cmd+S to save the current template
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        // Only save if there are unsaved changes on a non-system template
+        if (selected && hasChanges && (selected as any).user_id) {
+          handleSave();
+        }
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  });
 
   const selectTemplate = async (t: Template) => {
     const full = await getTemplate(t.id);
@@ -100,6 +129,7 @@ export default function TemplatesPage() {
 
   const handleSave = async () => {
     if (!selected) return;
+    setSaving(true);
     try {
       await updateTemplate(selected.id, {
         subject_line: subjectLine,
@@ -110,6 +140,8 @@ export default function TemplatesPage() {
       load();
     } catch {
       toast.error("Save failed");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -134,6 +166,7 @@ export default function TemplatesPage() {
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
+    setCreating(true);
     try {
       const t = await createTemplate({
         name: newName.trim(),
@@ -147,20 +180,27 @@ export default function TemplatesPage() {
       selectTemplate(t);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed");
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleDelete = async () => {
     if (deleteId === null) return;
-    await deleteTemplate(deleteId);
-    toast.success("Deleted");
-    if (selected?.id === deleteId) {
-      setSelected(null);
-      setSubjectLine("");
-      setBodyHtml("");
+    try {
+      await deleteTemplate(deleteId);
+      toast.success("Deleted");
+      if (selected?.id === deleteId) {
+        setSelected(null);
+        setSubjectLine("");
+        setBodyHtml("");
+      }
+      setDeleteId(null);
+      load();
+    } catch (err) {
+      const { handleApiError } = await import("@/lib/errorUtils");
+      handleApiError(err, "Failed to delete template");
     }
-    setDeleteId(null);
-    load();
   };
 
   const isSystem = (t: Template) => !(t as any).user_id;
@@ -168,7 +208,9 @@ export default function TemplatesPage() {
   const handleToggleDefault = async (t: Template) => {
     try {
       await setTemplateDefault(t.id);
-      toast.success(t.is_default ? "Default removed" : `"${t.name}" set as default`);
+      toast.success(
+        t.is_default ? "Default removed" : `"${t.name}" set as default`,
+      );
       await load();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to set default");
@@ -198,7 +240,10 @@ export default function TemplatesPage() {
         )}
         {t.name}
         {t.is_default && (
-          <Star size={12} className="text-yellow-500 fill-yellow-500 shrink-0" />
+          <Star
+            size={12}
+            className="text-yellow-500 fill-yellow-500 shrink-0"
+          />
         )}
       </span>
       <div className="flex items-center gap-0.5">
@@ -232,9 +277,9 @@ export default function TemplatesPage() {
   );
 
   return (
-    <div className="flex h-full gap-4">
+    <div className="flex h-full gap-4 flex-col md:flex-row">
       {/* Sidebar — template list */}
-      <Card className="w-64 shrink-0 flex flex-col">
+      <Card className="w-full md:w-64 shrink-0 flex flex-col max-h-60 md:max-h-none">
         <div className="p-3 border-b border-border flex items-center justify-between">
           <h3 className="font-semibold text-sm">Templates</h3>
           <Button size="icon" variant="ghost" onClick={() => setShowNew(true)}>
@@ -243,40 +288,62 @@ export default function TemplatesPage() {
         </div>
 
         <div className="flex-1 overflow-auto">
-          {myTemplates.length > 0 && (
+          {loading ? (
             <>
               <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">
-                My Templates
+                Loading…
               </div>
-              {myTemplates.map(renderTemplateItem)}
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="px-3 py-2.5 border-b border-border">
+                  <div className="h-4 w-3/4 rounded bg-primary/10 animate-pulse" />
+                </div>
+              ))}
             </>
-          )}
-          {systemTemplates.length > 0 && (
+          ) : (
             <>
-              <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">
-                System Templates
-              </div>
-              {systemTemplates.map(renderTemplateItem)}
+              {myTemplates.length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">
+                    My Templates
+                  </div>
+                  {myTemplates.map(renderTemplateItem)}
+                </>
+              )}
+              {systemTemplates.length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">
+                    System Templates
+                  </div>
+                  {systemTemplates.map(renderTemplateItem)}
+                </>
+              )}
+              {templates.length === 0 && (
+                <p className="p-4 text-sm text-muted-foreground text-center">
+                  No templates yet
+                </p>
+              )}
             </>
-          )}
-          {templates.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground text-center">
-              No templates yet
-            </p>
           )}
         </div>
       </Card>
 
       {/* New Template Dialog */}
-      <Dialog open={showNew} onOpenChange={setShowNew}>
+      <Dialog
+        open={showNew}
+        onOpenChange={(o) => {
+          setShowNew(o);
+          if (!o) setNewName("");
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Template</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div>
-              <Label>Template Name</Label>
+              <Label htmlFor="new-template-name">Template Name</Label>
               <Input
+                id="new-template-name"
                 placeholder="e.g. Cold Outreach"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -295,7 +362,12 @@ export default function TemplatesPage() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreate}>Create</Button>
+            <Button onClick={handleCreate} disabled={creating}>
+              {creating ? (
+                <Loader2 size={14} className="animate-spin mr-1" />
+              ) : null}
+              {creating ? "Creating..." : "Create"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -383,16 +455,24 @@ export default function TemplatesPage() {
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={!hasChanges || isSystem(selected)}
+                disabled={!hasChanges || isSystem(selected) || saving}
               >
-                <Save size={14} /> Save
+                {saving ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Save size={14} />
+                )}{" "}
+                {saving ? "Saving..." : "Save"}
               </Button>
             </div>
 
             {/* Subject line */}
             <div className="mb-3">
-              <Label className="text-xs mb-1">Subject Line</Label>
+              <Label htmlFor="subject-line" className="text-xs mb-1">
+                Subject Line
+              </Label>
               <Input
+                id="subject-line"
                 value={subjectLine}
                 onChange={(e) => {
                   setSubjectLine(e.target.value);
@@ -455,7 +535,9 @@ export default function TemplatesPage() {
                   </div>
                   <div
                     className="p-4"
-                    dangerouslySetInnerHTML={{ __html: preview.body }}
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(preview.body),
+                    }}
                   />
                 </Card>
               )}

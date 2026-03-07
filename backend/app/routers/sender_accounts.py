@@ -12,6 +12,7 @@ from app.models.sender_account import SenderAccount
 from app.schemas.sender_account import SenderAccountCreate, SenderAccountUpdate, SenderAccountOut
 from app.services.vault import store_secret, get_secret, update_secret, delete_secret
 from app.services.audit_service import log_audit
+from app.smtp_allowlist import is_allowed_smtp_host
 from app.logging_config import get_logger
 
 logger = get_logger("sender_accounts")
@@ -52,6 +53,12 @@ def create_sender_account(
 
     if data.provider == "smtp" and not data.smtp_host:
         raise HTTPException(400, "smtp_host is required for SMTP accounts")
+
+    # SSRF prevention: validate SMTP host against allowlist
+    if data.provider == "smtp":
+        smtp_host = data.smtp_host or "smtp.gmail.com"
+        if not is_allowed_smtp_host(smtp_host):
+            raise HTTPException(400, f"SMTP host '{smtp_host}' is not in the allowed list. Contact admin to add it.")
 
     # If setting as default, clear existing default for this user
     if data.is_default:
@@ -135,6 +142,9 @@ def update_sender_account(
                   "organization_name", "organization_type", "title", "city"):
         val = getattr(data, field, None)
         if val is not None:
+            # SSRF prevention on SMTP host update
+            if field == "smtp_host" and not is_allowed_smtp_host(str(val)):
+                raise HTTPException(400, f"SMTP host '{val}' is not in the allowed list.")
             setattr(account, field, val)
 
     # Update credential in Vault if provided
@@ -254,6 +264,8 @@ def test_credential_before_save(
 
 def _test_smtp(email: str, password: str, host: str, port: int) -> dict:
     """Test SMTP connection by logging in and immediately quitting."""
+    if not is_allowed_smtp_host(host):
+        raise HTTPException(400, f"SMTP host '{host}' is not in the allowed list.")
     try:
         context = ssl.create_default_context()
         server = smtplib.SMTP_SSL(host, port, context=context, timeout=10)
@@ -263,16 +275,23 @@ def _test_smtp(email: str, password: str, host: str, port: int) -> dict:
     except smtplib.SMTPAuthenticationError:
         raise HTTPException(400, f"Authentication failed for {email}. If using Gmail, use an App Password.")
     except Exception as e:
-        raise HTTPException(400, f"SMTP connection failed: {e}")
+        import logging
+        logging.getLogger("app.sender_accounts").error(f"SMTP connection test failed for {email}@{host}:{port}: {e}")
+        raise HTTPException(400, "SMTP connection failed. Check your server settings and try again.")
 
 
 def _test_resend(api_key: str) -> dict:
-    """Test Resend API key by listing domains."""
+    """Test Resend API key by listing domains (uses httpx, no global state)."""
     try:
-        import resend
-        resend.api_key = api_key
-        # Try listing domains to validate the key
-        resend.Domains.list()
+        import httpx
+        resp = httpx.get(
+            "https://api.resend.com/domains",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
         return {"status": "ok", "detail": "Resend API key is valid"}
     except Exception as e:
-        raise HTTPException(400, f"Resend API key test failed: {e}")
+        import logging
+        logging.getLogger("app.sender_accounts").error(f"Resend API key test failed: {e}")
+        raise HTTPException(400, "Resend API key test failed. Verify the key is correct and active.")

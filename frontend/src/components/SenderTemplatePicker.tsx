@@ -4,6 +4,7 @@ import type { Template, SenderInfo } from "@/api/client";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { handleApiError } from "@/lib/errorUtils";
 
 interface Props {
   senderEmail: string;
@@ -22,17 +23,21 @@ export default function SenderTemplatePicker({
   const [templates, setTemplates] = useState<Template[]>([]);
 
   useEffect(() => {
-    getSenders().then((r) => setSenders(r.senders));
-    getTemplates().then((tpls) => {
-      setTemplates(tpls);
-      // Auto-select default template if none is selected yet
-      if (!templateFile) {
-        const defaultTpl = tpls.find((t) => t.is_default);
-        if (defaultTpl) {
-          onTemplateChange(defaultTpl.name);
+    getSenders()
+      .then((r) => setSenders(r.senders))
+      .catch((e) => handleApiError(e, "Failed to load senders"));
+    getTemplates()
+      .then((tpls) => {
+        setTemplates(tpls);
+        // Auto-select default template if none is selected yet
+        if (!templateFile) {
+          const defaultTpl = tpls.find((t) => t.is_default);
+          if (defaultTpl) {
+            onTemplateChange(defaultTpl.name);
+          }
         }
-      }
-    });
+      })
+      .catch((e) => handleApiError(e, "Failed to load templates"));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

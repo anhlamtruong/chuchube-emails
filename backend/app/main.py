@@ -6,8 +6,8 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app import config
@@ -25,28 +25,15 @@ from app.models.sender_account import SenderAccount  # noqa: F401 – register m
 from app.models.audit_log import AuditLog  # noqa: F401 – register model
 from app.models.custom_column import CustomColumnDefinition  # noqa: F401 – register model
 from app.models.access_key import AccessKey  # noqa: F401 – register model
+from app.models.bounce_log import BounceLog  # noqa: F401 – register model
 
 from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs, custom_columns
 from app.routers import admin as admin_router
+from app.routers import bounces as bounces_router
 from app.background import start_scheduler, stop_scheduler
+from app.rate_limit import limiter
 
-
-def _rate_limit_key(request: Request) -> str:
-    """Use authenticated user_id as rate-limit key, fallback to IP."""
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        try:
-            from app.auth import verify_clerk_token
-            payload = verify_clerk_token(auth_header.split(" ", 1)[1])
-            uid = payload.get("sub")
-            if uid:
-                return uid
-        except Exception:
-            pass
-    return get_remote_address(request)
-
-
-limiter = Limiter(key_func=_rate_limit_key, default_limits=["200/minute"])
+logger = get_logger("app")
 
 
 def seed_templates():
@@ -100,6 +87,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger = get_logger("startup")
     logger.info("Starting ChuChuBe Emails")
+    config.validate_config()
     init_db()
     seed_templates()
     start_scheduler()
@@ -120,21 +108,38 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS for frontend dev server
+# CORS — allow the configured frontend origin + localhost dev (http + https variants)
+_dev_origins = [
+    "http://localhost:5173",
+    "https://localhost:5173",
+    "http://localhost:3000",
+    "https://localhost:3000",
+    "http://localhost",
+    "https://localhost",
+]
+_cors_origins = [o for o in [config.FRONTEND_URL] + _dev_origins if o]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[config.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000", "http://localhost"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Access-Key"],
 )
 
 
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(request: Request, exc: IntegrityError):
     """Convert any unhandled DB unique/FK violation into a 409 instead of a 500 crash."""
-    detail = str(exc.orig) if exc.orig else str(exc)
-    return JSONResponse(status_code=409, content={"detail": detail})
+    # Never leak raw SQL errors to clients
+    logger.warning(f"IntegrityError on {request.url.path}: {exc}")
+    return JSONResponse(status_code=409, content={"detail": "A conflicting record already exists."})
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all — log the traceback server-side but return a generic 500 to the client."""
+    logger.exception(f"Unhandled error on {request.method} {request.url.path}")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # --- Protected routes (Clerk JWT verification) ---
@@ -151,6 +156,10 @@ app.include_router(sender_accounts.router, dependencies=[Depends(require_auth)])
 app.include_router(audit_logs.router, dependencies=[Depends(require_auth)])
 app.include_router(custom_columns.router, dependencies=[Depends(require_auth)])
 app.include_router(admin_router.router, dependencies=[Depends(require_auth)])
+app.include_router(bounces_router.router, dependencies=[Depends(require_auth)])
+# SSE endpoint uses query-param auth (EventSource can't set headers)
+app.include_router(bounces_router.sse_router)
+app.include_router(emails.sse_router)
 
 
 # --- Access key validation middleware ---
@@ -189,7 +198,7 @@ class AccessKeyMiddleware(BaseHTTPMiddleware):
                     finally:
                         db.close()
             except Exception:
-                pass  # Let the actual endpoint handler deal with auth errors
+                logger.debug("AccessKeyMiddleware: auth verification failed, deferring to endpoint handler", exc_info=True)
 
         return await call_next(request)
 
@@ -206,31 +215,49 @@ class _AccessKeyValidateBody(PydanticBaseModel):
     key: str
 
 @app.post("/api/auth/validate-access-key")
-def validate_access_key_endpoint(body: _AccessKeyValidateBody):
+@limiter.limit("5/minute")
+def validate_access_key_endpoint(request: Request, body: _AccessKeyValidateBody):
     """Public endpoint to check if an access key is valid (before login).
 
-    Returns structured error codes so the frontend can show specific messages:
-    - not_found: key does not exist in the database
-    - revoked: key exists but has been deactivated
-    - already_claimed: key is already bound to another user
+    Returns a generic error for all invalid-key conditions to prevent
+    attackers from enumerating key states.
     """
     from app.models.access_key import AccessKey as AK
     from app.config import ACCESS_MASTER_KEY
+    import bcrypt
+    import hmac
 
-    # Master key always passes
-    if ACCESS_MASTER_KEY and body.key == ACCESS_MASTER_KEY:
+    # Master key always passes (timing-safe comparison)
+    if ACCESS_MASTER_KEY and hmac.compare_digest(body.key, ACCESS_MASTER_KEY):
         return {"valid": True, "label": "Master Key"}
 
     db = SessionLocal()
     try:
-        # Check ALL keys with this value (including inactive) for better error reporting
-        ak = db.query(AK).filter(AK.key == body.key).first()
+        # Bcrypt lookup by prefix — plaintext fallback removed (migration 024)
+        prefix = body.key[:8]
+        candidates = (
+            db.query(AK)
+            .filter(AK.key_prefix == prefix)
+            .all()
+        )
+        ak = None
+        for c in candidates:
+            if c.key_hash and bcrypt.checkpw(body.key.encode(), c.key_hash.encode()):
+                ak = c
+                break
+
+        # Generic error for all invalid-key conditions to prevent state enumeration
+        _GENERIC_KEY_ERROR = {
+            "error_code": "invalid",
+            "message": "This access key is invalid or unavailable. Please check the key or contact the admin.",
+        }
+
         if not ak:
-            raise HTTPException(403, detail={"error_code": "not_found", "message": "This access key was not found. Please check the key and try again."})
+            raise HTTPException(403, detail=_GENERIC_KEY_ERROR)
         if not ak.is_active:
-            raise HTTPException(403, detail={"error_code": "revoked", "message": "This access key has been revoked. Please contact the admin for a new key."})
+            raise HTTPException(403, detail=_GENERIC_KEY_ERROR)
         if ak.used_by_user_id is not None:
-            raise HTTPException(403, detail={"error_code": "already_claimed", "message": "This access key is already in use by another account."})
+            raise HTTPException(403, detail=_GENERIC_KEY_ERROR)
         return {"valid": True, "label": ak.label}
     finally:
         db.close()
@@ -243,44 +270,40 @@ def health():
 
 
 @app.get("/api/dashboard")
-def dashboard(auth=Depends(require_auth)):
+def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
     from app.auth import get_user_id
     uid = get_user_id(auth)
-    db = SessionLocal()
-    try:
-        from sqlalchemy import func
+    from sqlalchemy import func
 
-        total_recruiters = db.query(Recruiter).count()
-        total_campaigns = db.query(EmailColumn).filter(EmailColumn.user_id == uid).count()
-        statuses = (
-            db.query(EmailColumn.sent_status, func.count())
-            .filter(EmailColumn.user_id == uid)
-            .group_by(EmailColumn.sent_status)
-            .all()
-        )
-        # Upcoming scheduled jobs for this user
-        from app.models.job_result import JobResult
-        upcoming = (
-            db.query(JobResult)
-            .filter(JobResult.status.in_(["queued", "scheduled"]))
-            .order_by(JobResult.created_at.desc())
-            .limit(5)
-            .all()
-        )
-        return {
-            "total_recruiters": total_recruiters,
-            "total_campaigns": total_campaigns,
-            "by_status": {s: c for s, c in statuses},
-            "upcoming_jobs": [
-                {
-                    "job_id": jr.id,
-                    "status": jr.status,
-                    "total": jr.total,
-                    "sent": jr.sent,
-                    "created_at": jr.created_at.isoformat() if jr.created_at else None,
-                }
-                for jr in upcoming
-            ],
-        }
-    finally:
-        db.close()
+    total_recruiters = db.query(Recruiter).count()
+    total_campaigns = db.query(EmailColumn).filter(EmailColumn.user_id == uid).count()
+    statuses = (
+        db.query(EmailColumn.sent_status, func.count())
+        .filter(EmailColumn.user_id == uid)
+        .group_by(EmailColumn.sent_status)
+        .all()
+    )
+    # Upcoming scheduled jobs for this user
+    from app.models.job_result import JobResult
+    upcoming = (
+        db.query(JobResult)
+        .filter(JobResult.user_id == uid, JobResult.status.in_(["queued", "scheduled"]))
+        .order_by(JobResult.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    return {
+        "total_recruiters": total_recruiters,
+        "total_campaigns": total_campaigns,
+        "by_status": {s: c for s, c in statuses},
+        "upcoming_jobs": [
+            {
+                "job_id": jr.id,
+                "status": jr.status,
+                "total": jr.total,
+                "sent": jr.sent,
+                "created_at": jr.created_at.isoformat() if jr.created_at else None,
+            }
+            for jr in upcoming
+        ],
+    }

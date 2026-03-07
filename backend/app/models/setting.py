@@ -50,4 +50,6 @@ DEFAULT_SETTINGS: dict[str, tuple[str, str]] = {
     "smtp_server": ("smtp.gmail.com", "SMTP server hostname"),
     "smtp_port": ("465", "SMTP server port"),
     "sleep_between_emails": ("2", "Seconds to wait between sending emails"),
+    # Bounce detection
+    "bounce_check_enabled": ("true", "Enable or disable automatic bounce scanning"),
 }

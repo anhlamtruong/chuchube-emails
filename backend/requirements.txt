@@ -14,3 +14,7 @@ requests
 supabase
 resend
 slowapi
+sse-starlette
+nh3
+httpx
+bcrypt

@@ -1,8 +1,11 @@
 import os
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
 
 load_dotenv()
+
+_config_logger = logging.getLogger("app.config")
 
 # --- Paths ---
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,7 +31,11 @@ YOUR_STATE_AND_CITY = os.getenv("YOUR_CITY_STATE", "")
 
 # --- SMTP ---
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+try:
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+except ValueError:
+    _config_logger.warning("Invalid SMTP_PORT value, falling back to 465")
+    SMTP_PORT = 465
 
 # --- Auth (Clerk) ---
 CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY", "")
@@ -40,6 +47,7 @@ CLERK_JWKS_URL = os.getenv(
 )
 
 # --- CORS ---
+# In production, set FRONTEND_URL to your HTTPS origin (e.g. https://yourdomain.com).
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 # --- Session ---
@@ -47,5 +55,46 @@ SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "86400"))  # 
 
 # --- Access Key Gate ---
 ACCESS_KEY_ENABLED = os.getenv("ACCESS_KEY_ENABLED", "true").lower() in ("true", "1", "yes")
-ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "user_3ABxlstfC7GShKC13A9yH9iYUkH")
+# DEPRECATED: ADMIN_USER_ID is used only by Alembic migrations (019, 021) for seeding.
+# Role management is now DB-backed via the user_roles table.
+# Set this in .env for fresh-database migrations; no runtime code uses it.
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "")
 ACCESS_MASTER_KEY = os.getenv("ACCESS_MASTER_KEY", "")
+
+# --- Ollama / LLM ---
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+
+# --- Bounce Detection ---
+try:
+    BOUNCE_CHECK_INTERVAL = int(os.getenv("BOUNCE_CHECK_INTERVAL", "300"))  # seconds
+except ValueError:
+    _config_logger.warning("Invalid BOUNCE_CHECK_INTERVAL value, falling back to 300")
+    BOUNCE_CHECK_INTERVAL = 300
+BOUNCE_CHECK_ENABLED = os.getenv("BOUNCE_CHECK_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def validate_config() -> None:
+    """Check that critical configuration values are present and warn on gaps.
+
+    Called at application startup so problems surface immediately.
+    """
+    _required = {
+        "DATABASE_URL": DATABASE_URL,
+    }
+    for name, value in _required.items():
+        if not value or value.startswith("sqlite"):
+            _config_logger.warning(f"Config: {name} is not set or using default SQLite — this is not suitable for production")
+
+    _important = {
+        "CLERK_SECRET_KEY": CLERK_SECRET_KEY,
+        "CLERK_JWKS_URL": CLERK_JWKS_URL,
+        "SUPABASE_URL": SUPABASE_URL,
+        "SUPABASE_SERVICE_KEY": SUPABASE_SERVICE_KEY,
+    }
+    for name, value in _important.items():
+        if not value:
+            _config_logger.warning(f"Config: {name} is empty — some features will be unavailable")
+
+    if ACCESS_KEY_ENABLED and not ACCESS_MASTER_KEY:
+        _config_logger.warning("Config: ACCESS_KEY_ENABLED is true but ACCESS_MASTER_KEY is empty")

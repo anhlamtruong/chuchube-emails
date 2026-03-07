@@ -1,25 +1,51 @@
 """Template rendering service — migrated from sending_email/template_handler.py"""
+import html as _html
 import os
 import re
 
 
-def safe_substitute(template: str, replacements: dict[str, str]) -> str:
+# Placeholder keys whose values are trusted HTML and must NOT be escaped.
+# Everything else is HTML-escaped to prevent injection.
+_RAW_HTML_FIELDS: set[str] = {"dynamic_image_tag"}
+
+
+def safe_substitute(
+    template: str,
+    replacements: dict[str, str],
+    *,
+    raw_fields: set[str] | None = None,
+) -> str:
     """Replace {placeholder} tokens using regex so CSS braces are left alone.
 
     Only matches `{word_chars}` — bare `{ property: value; }` in CSS is
-    never touched.
+    never touched.  All replacement values are HTML-escaped unless the key
+    is in *raw_fields* (or the module-level ``_RAW_HTML_FIELDS`` set).
     """
+    allowed_raw = raw_fields if raw_fields is not None else _RAW_HTML_FIELDS
+
     def _replacer(m: re.Match) -> str:
         key = m.group(1)
-        return replacements.get(key, m.group(0))  # keep unknown placeholders
+        value = replacements.get(key)
+        if value is None:
+            return m.group(0)  # keep unknown placeholders
+        if key in allowed_raw:
+            return value
+        return _html.escape(str(value))
 
     return re.sub(r"\{(\w+)\}", _replacer, template)
 
 
 def load_template_from_file(template_folder: str, template_file: str) -> tuple[str, str]:
-    """Load template from file, split into (subject, body) on '---' separator."""
-    template_path = os.path.join(template_folder, template_file)
-    with open(template_path, "r", encoding="utf-8") as f:
+    """Load template from file, split into (subject, body) on '---' separator.
+
+    Raises ``ValueError`` if *template_file* resolves outside *template_folder*
+    (path-traversal protection).
+    """
+    base = os.path.realpath(template_folder)
+    target = os.path.realpath(os.path.join(template_folder, template_file))
+    if not target.startswith(base + os.sep) and target != base:
+        raise ValueError(f"Template path escapes the template folder: {template_file!r}")
+    with open(target, "r", encoding="utf-8") as f:
         full_content = f.read()
     return split_template(full_content)
 

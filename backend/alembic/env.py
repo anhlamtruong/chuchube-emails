@@ -13,6 +13,8 @@ from app.models.document import Document  # noqa: F401
 from app.models.setting import Setting  # noqa: F401
 from app.models.job_result import JobResult  # noqa: F401
 from app.models.access_key import AccessKey  # noqa: F401
+from app.models.user_role import UserRole  # noqa: F401
+from app.models.user_profile import UserProfile  # noqa: F401
 
 config = context.config
 

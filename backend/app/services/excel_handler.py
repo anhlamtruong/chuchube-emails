@@ -23,7 +23,7 @@ EXCEL_TO_MODEL = {
 MODEL_TO_EXCEL = {v: k for k, v in EXCEL_TO_MODEL.items()}
 
 
-def import_excel(file_bytes: bytes, db: Session) -> dict:
+def import_excel(file_bytes: bytes, db: Session, *, user_id: str | None = None) -> dict:
     """Import an Excel file into EmailColumn rows. Returns stats."""
     df = pd.read_excel(io.BytesIO(file_bytes), dtype={"Sent or Not": str})
     created = 0
@@ -44,6 +44,9 @@ def import_excel(file_bytes: bytes, db: Session) -> dict:
         else:
             data["sent_status"] = "pending"
 
+        if user_id:
+            data["user_id"] = user_id
+
         email_col = EmailColumn(**data)
         db.add(email_col)
         created += 1
@@ -52,11 +55,21 @@ def import_excel(file_bytes: bytes, db: Session) -> dict:
     return {"created": created, "skipped": skipped}
 
 
-def import_recruiters_from_excel(file_bytes: bytes, db: Session) -> dict:
+def import_recruiters_from_excel(file_bytes: bytes, db: Session, *, user_id: str | None = None, is_admin: bool = False) -> dict:
     """Import recruiters from an Excel file. Deduplicates by email."""
     df = pd.read_excel(io.BytesIO(file_bytes))
     created = 0
     skipped = 0
+
+    approval = "approved" if is_admin else "pending"
+
+    # Batch-check existing emails
+    all_emails = [str(row.get("Email", "")).strip().lower() for _, row in df.iterrows() if str(row.get("Email", "")).strip()]
+    existing_emails: set[str] = set()
+    for i in range(0, len(all_emails), 500):
+        chunk = all_emails[i:i+500]
+        results = db.query(Recruiter.email).filter(Recruiter.email.in_(chunk)).all()
+        existing_emails.update(e.lower() for (e,) in results)
 
     for _, row in df.iterrows():
         email = str(row.get("Email", "")).strip()
@@ -64,8 +77,7 @@ def import_recruiters_from_excel(file_bytes: bytes, db: Session) -> dict:
             skipped += 1
             continue
 
-        existing = db.query(Recruiter).filter(Recruiter.email == email).first()
-        if existing:
+        if email.lower() in existing_emails:
             skipped += 1
             continue
 
@@ -76,17 +88,23 @@ def import_recruiters_from_excel(file_bytes: bytes, db: Session) -> dict:
             title=str(row.get("Positions", row.get("Title", ""))).strip(),
             location=str(row.get("Location", "")).strip(),
             notes=str(row.get("Notes", "")).strip(),
+            user_id=user_id,
+            approval_status=approval,
         )
         db.add(recruiter)
+        existing_emails.add(email.lower())
         created += 1
 
     db.commit()
     return {"created": created, "skipped": skipped}
 
 
-def export_excel(db: Session) -> bytes:
-    """Export all EmailColumn rows to an Excel file (bytes)."""
-    rows = db.query(EmailColumn).all()
+def export_excel(db: Session, *, user_id: str | None = None) -> bytes:
+    """Export EmailColumn rows to an Excel file (bytes). Scoped to user_id if provided."""
+    q = db.query(EmailColumn)
+    if user_id:
+        q = q.filter(EmailColumn.user_id == user_id)
+    rows = q.all()
     data = []
     for r in rows:
         row_dict = {}

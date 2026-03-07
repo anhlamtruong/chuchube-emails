@@ -1,28 +1,22 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Loader2, ShieldX, ShieldOff, UserX, AlertCircle, Mail } from "lucide-react";
+import { KeyRound, Loader2, ShieldX, AlertCircle, Mail } from "lucide-react";
 import { validateAccessKey } from "../api/client";
+import { setAccessKey } from "../lib/accessKeyStore";
 
 interface Props {
   onValidated: () => void;
 }
 
-type ErrorCode = "not_found" | "revoked" | "already_claimed" | "empty" | "unknown";
+type ErrorCode = "invalid" | "empty" | "unknown";
 
-const ERROR_CONFIG: Record<ErrorCode, { icon: typeof ShieldX; label: string; color: string }> = {
-  not_found: {
+const ERROR_CONFIG: Record<
+  ErrorCode,
+  { icon: typeof ShieldX; label: string; color: string }
+> = {
+  invalid: {
     icon: ShieldX,
-    label: "Key not found",
+    label: "Invalid access key",
     color: "text-destructive",
-  },
-  revoked: {
-    icon: ShieldOff,
-    label: "Key revoked",
-    color: "text-amber-600",
-  },
-  already_claimed: {
-    icon: UserX,
-    label: "Key already claimed",
-    color: "text-orange-600",
   },
   empty: {
     icon: AlertCircle,
@@ -38,7 +32,10 @@ const ERROR_CONFIG: Record<ErrorCode, { icon: typeof ShieldX; label: string; col
 
 export default function AccessKeyPage({ onValidated }: Props) {
   const [key, setKey] = useState("");
-  const [error, setError] = useState<{ code: ErrorCode; message: string } | null>(null);
+  const [error, setError] = useState<{
+    code: ErrorCode;
+    message: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [shake, setShake] = useState(false);
 
@@ -60,7 +57,7 @@ export default function AccessKeyPage({ onValidated }: Props) {
 
     try {
       await validateAccessKey(key.trim());
-      localStorage.setItem("access_key", key.trim());
+      setAccessKey(key.trim());
       onValidated();
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,7 +69,10 @@ export default function AccessKeyPage({ onValidated }: Props) {
           message: detail.message || "Invalid access key.",
         });
       } else {
-        const msg = typeof detail === "string" ? detail : "An unexpected error occurred. Please try again.";
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : "An unexpected error occurred. Please try again.";
         setError({ code: "unknown", message: msg });
       }
       triggerShake();
@@ -81,17 +81,23 @@ export default function AccessKeyPage({ onValidated }: Props) {
     }
   };
 
-  const errCfg = error ? ERROR_CONFIG[error.code] || ERROR_CONFIG.unknown : null;
+  const errCfg = error
+    ? ERROR_CONFIG[error.code] || ERROR_CONFIG.unknown
+    : null;
   const ErrIcon = errCfg?.icon;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className={`w-full max-w-sm mx-auto ${shake ? "animate-shake" : ""}`}>
+      <div
+        className={`w-full max-w-sm mx-auto ${shake ? "animate-shake" : ""}`}
+      >
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mb-4">
             <KeyRound className="w-7 h-7 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">ChuChuBe Emails</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            ChuChuBe Emails
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Enter your access key to continue
           </p>
@@ -115,10 +121,16 @@ export default function AccessKeyPage({ onValidated }: Props) {
 
             {error && errCfg && ErrIcon && (
               <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-                <ErrIcon className={`w-4 h-4 mt-0.5 shrink-0 ${errCfg.color}`} />
+                <ErrIcon
+                  className={`w-4 h-4 mt-0.5 shrink-0 ${errCfg.color}`}
+                />
                 <div className="space-y-1 min-w-0">
-                  <p className={`text-sm font-medium ${errCfg.color}`}>{errCfg.label}</p>
-                  <p className="text-xs text-muted-foreground">{error.message}</p>
+                  <p className={`text-sm font-medium ${errCfg.color}`}>
+                    {errCfg.label}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {error.message}
+                  </p>
                 </div>
               </div>
             )}

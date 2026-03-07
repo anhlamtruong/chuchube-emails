@@ -1,18 +1,33 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { getScheduledJobs, cancelScheduledJob } from "@/api/client";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import type { ScheduledJob, FinishedJob } from "@/api/client";
+import { useJobSSE } from "@/hooks/useJobSSE";
+import type { JobUpdateEvent } from "@/hooks/useJobSSE";
+import StatusDot from "@/components/StatusDot";
+
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
+import listPlugin from "@fullcalendar/list";
+import interactionPlugin from "@fullcalendar/interaction";
+import type { EventInput, EventClickArg } from "@fullcalendar/core";
+
 import {
-  Calendar,
+  Calendar as CalendarIcon,
   Trash2,
   RefreshCw,
   ChevronDown,
   ChevronRight,
+  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableHeader,
@@ -31,7 +46,33 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const STATUS_COLORS: Record<string, string> = {
+  queued: "oklch(0.65 0.15 250)",
+  scheduled: "oklch(0.7 0.15 80)",
+  running: "oklch(0.65 0.2 145)",
+  completed: "oklch(0.6 0.18 145)",
+  error: "oklch(0.55 0.22 27)",
+  cancelled: "oklch(0.55 0.02 250)",
+};
+
+const statusVariant = (
+  status: string,
+): "default" | "secondary" | "destructive" | "outline" => {
+  switch (status) {
+    case "completed":
+      return "default";
+    case "error":
+      return "destructive";
+    case "cancelled":
+      return "outline";
+    default:
+      return "secondary";
+  }
+};
+
 export default function ScheduledJobsPage() {
+  usePageTitle("Scheduled Jobs");
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [finished, setFinished] = useState<FinishedJob[]>([]);
   const [showFinished, setShowFinished] = useState(true);
@@ -53,9 +94,35 @@ export default function ScheduledJobsPage() {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 30_000);
-    return () => clearInterval(interval);
   }, [load]);
+
+  // SSE: live updates replace polling
+  const hasRunning = jobs.some((j) => j.status === "running");
+
+  const handleJobUpdate = useCallback((data: JobUpdateEvent) => {
+    setJobs((prev) =>
+      prev.map((j) =>
+        j.job_id === data.job_id
+          ? { ...j, status: data.status, sent: data.sent, failed: data.failed }
+          : j,
+      ),
+    );
+  }, []);
+
+  const handleJobFinished = useCallback(
+    (data: JobUpdateEvent) => {
+      handleJobUpdate(data);
+      // Reload to move finished jobs between lists
+      setTimeout(() => load(), 500);
+    },
+    [handleJobUpdate, load],
+  );
+
+  useJobSSE({
+    enabled: hasRunning,
+    onJobUpdate: handleJobUpdate,
+    onJobFinished: handleJobFinished,
+  });
 
   const confirmCancel = async () => {
     if (cancelTarget === null) return;
@@ -70,20 +137,28 @@ export default function ScheduledJobsPage() {
     }
   };
 
-  const statusVariant = (
-    status: string,
-  ): "default" | "secondary" | "destructive" | "outline" => {
-    switch (status) {
-      case "completed":
-        return "default";
-      case "error":
-        return "destructive";
-      case "cancelled":
-        return "outline";
-      default:
-        return "secondary";
-    }
+  // Calendar events from all jobs
+  const calendarEvents: EventInput[] = useMemo(() => {
+    const allJobs = [...jobs, ...finished];
+    return allJobs.map((job) => ({
+      id: job.job_id,
+      title: `${job.name} (${job.sent}/${job.total})`,
+      start: job.scheduled_at ?? job.created_at ?? undefined,
+      backgroundColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
+      borderColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
+      extendedProps: { status: job.status, job },
+    }));
+  }, [jobs, finished]);
+
+  const handleEventClick = (info: EventClickArg) => {
+    navigate(`/scheduled-jobs/${info.event.id}`);
   };
+
+  // Stats
+  const runningCount = jobs.filter((j) => j.status === "running").length;
+  const scheduledCount = jobs.filter(
+    (j) => j.status === "queued" || j.status === "scheduled",
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -91,11 +166,24 @@ export default function ScheduledJobsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Calendar size={22} className="text-primary" /> Scheduled & Active
-            Jobs
+            <CalendarIcon size={22} className="text-primary" /> Scheduled &
+            Active Jobs
           </h2>
           <p className="text-sm text-muted-foreground">
-            Jobs are stored in the database and processed by background workers
+            {runningCount > 0 && (
+              <span className="text-green-600 font-medium mr-2">
+                {runningCount} running
+              </span>
+            )}
+            {scheduledCount > 0 && (
+              <span className="mr-2">{scheduledCount} scheduled</span>
+            )}
+            {finished.length > 0 && <span>{finished.length} finished</span>}
+            {runningCount === 0 &&
+              scheduledCount === 0 &&
+              finished.length === 0 && (
+                <span>No jobs yet. Use the Send page to create one.</span>
+              )}
           </p>
         </div>
         <Button variant="outline" onClick={load} disabled={loading}>
@@ -107,8 +195,37 @@ export default function ScheduledJobsPage() {
         </Button>
       </div>
 
-      {/* Table */}
+      {/* Calendar */}
       <Card>
+        <CardContent className="pt-6 fc-themed">
+          <FullCalendar
+            plugins={[
+              dayGridPlugin,
+              timeGridPlugin,
+              listPlugin,
+              interactionPlugin,
+            ]}
+            initialView="dayGridMonth"
+            headerToolbar={{
+              left: "prev,next today",
+              center: "title",
+              right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+            }}
+            events={calendarEvents}
+            eventClick={handleEventClick}
+            height="auto"
+            eventDisplay="block"
+            dayMaxEvents={3}
+            nowIndicator
+          />
+        </CardContent>
+      </Card>
+
+      {/* Active Jobs Table */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Active Jobs</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           {loading && jobs.length === 0 ? (
             <div className="p-6 space-y-3">
@@ -124,56 +241,101 @@ export default function ScheduledJobsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
+                  <TableHead className="w-5" />
                   <TableHead>Name</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Sent</TableHead>
-                  <TableHead>Failed</TableHead>
+                  <TableHead>Progress</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Scheduled</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {jobs.map((job) => (
-                  <TableRow key={job.job_id}>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {job.job_id}
-                    </TableCell>
-                    <TableCell className="font-medium">{job.name}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(job.status)}>
-                        {job.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{job.total}</TableCell>
-                    <TableCell className="text-green-600 font-medium">
-                      {job.sent}
-                    </TableCell>
-                    <TableCell className="text-destructive font-medium">
-                      {job.failed}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {job.created_at
-                        ? new Date(job.created_at).toLocaleString()
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {(job.status === "queued" ||
-                        job.status === "scheduled") && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setCancelTarget(job.job_id)}
-                          title="Cancel job"
-                          className="text-destructive hover:text-destructive"
+                {jobs.map((job) => {
+                  const pct =
+                    job.total > 0
+                      ? ((job.sent + job.failed) / job.total) * 100
+                      : 0;
+                  return (
+                    <TableRow
+                      key={job.job_id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => navigate(`/scheduled-jobs/${job.job_id}`)}
+                    >
+                      <TableCell>
+                        <StatusDot status={job.status} />
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {job.name}
+                        <span className="block text-xs text-muted-foreground font-mono">
+                          {job.job_id.slice(0, 8)}…
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={statusVariant(job.status)}
+                          className="capitalize"
                         >
-                          <Trash2 size={15} />
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {job.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="min-w-40">
+                        <div className="flex items-center gap-2">
+                          <Progress value={pct} className="h-1.5 flex-1" />
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            <span className="text-green-600 font-medium">
+                              {job.sent}
+                            </span>
+                            /
+                            <span className="text-destructive font-medium">
+                              {job.failed}
+                            </span>
+                            /{job.total}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {job.created_at
+                          ? new Date(job.created_at).toLocaleString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {job.scheduled_at
+                          ? new Date(job.scheduled_at).toLocaleString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div
+                          className="flex items-center justify-end gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {(job.status === "queued" ||
+                            job.status === "scheduled") && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setCancelTarget(job.job_id)}
+                              title="Cancel job"
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 size={15} />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              navigate(`/scheduled-jobs/${job.job_id}`)
+                            }
+                            title="View details"
+                          >
+                            <ArrowUpRight size={15} />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -200,43 +362,81 @@ export default function ScheduledJobsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>ID</TableHead>
+                      <TableHead className="w-5" />
                       <TableHead>Name</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Sent</TableHead>
-                      <TableHead>Failed</TableHead>
+                      <TableHead>Progress</TableHead>
                       <TableHead>Completed</TableHead>
+                      <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {finished.map((job) => (
-                      <TableRow key={job.job_id}>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {job.job_id}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {job.name}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={statusVariant(job.status)}>
-                            {job.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{job.total}</TableCell>
-                        <TableCell className="text-green-600 font-medium">
-                          {job.sent}
-                        </TableCell>
-                        <TableCell className="text-destructive font-medium">
-                          {job.failed}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {job.completed_at
-                            ? new Date(job.completed_at).toLocaleString()
-                            : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {finished.map((job) => {
+                      const pct =
+                        job.total > 0
+                          ? ((job.sent + job.failed) / job.total) * 100
+                          : 0;
+                      return (
+                        <TableRow
+                          key={job.job_id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            navigate(`/scheduled-jobs/${job.job_id}`)
+                          }
+                        >
+                          <TableCell>
+                            <StatusDot status={job.status} />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {job.name}
+                            <span className="block text-xs text-muted-foreground font-mono">
+                              {job.job_id.slice(0, 8)}…
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={statusVariant(job.status)}
+                              className="capitalize"
+                            >
+                              {job.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="min-w-40">
+                            <div className="flex items-center gap-2">
+                              <Progress value={pct} className="h-1.5 flex-1" />
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                <span className="text-green-600 font-medium">
+                                  {job.sent}
+                                </span>
+                                /
+                                <span className="text-destructive font-medium">
+                                  {job.failed}
+                                </span>
+                                /{job.total}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {job.completed_at
+                              ? new Date(job.completed_at).toLocaleString()
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/scheduled-jobs/${job.job_id}`);
+                              }}
+                              title="View details"
+                            >
+                              <ArrowUpRight size={15} />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>

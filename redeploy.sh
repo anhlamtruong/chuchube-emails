@@ -4,16 +4,17 @@ set -e
 
 cd "$(dirname "$0")"
 
-echo "=== Building backend ==="
-docker compose build backend
+echo "=== Building & starting all containers ==="
+docker compose up -d --build
 
 echo ""
-echo "=== Building frontend ==="
-docker compose build frontend
+echo "=== Running database migrations ==="
+docker compose exec backend alembic upgrade head
 
 echo ""
-echo "=== Restarting containers ==="
-docker compose up -d backend frontend
+echo "=== Pulling Ollama model (background) ==="
+docker compose exec -d ollama ollama pull deepseek-r1:1.5b
+echo "  (model pull running in background)"
 
 echo ""
 echo "=== Waiting for backend startup ==="

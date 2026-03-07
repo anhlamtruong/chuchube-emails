@@ -1,11 +1,11 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TemplateBase(BaseModel):
-    name: str
-    subject_line: str = ""
-    body_html: str = ""
+    name: str = Field(..., max_length=500)
+    subject_line: str = Field("", max_length=2000)
+    body_html: str = Field("", max_length=500_000)  # ~500 KB max
 
 
 class TemplateCreate(TemplateBase):

@@ -18,18 +18,41 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Allowed file extensions for upload
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt",
-                      ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
-                      ".zip", ".pptx", ".ppt"}
+                      ".png", ".jpg", ".jpeg", ".gif", ".webp",
+                      ".pptx", ".ppt"}
+# SVG and ZIP removed — SVG can contain scripts, ZIP can hide payloads
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+
+# Magic-byte signatures used to validate that file content matches extension
+_MAGIC_BYTES: dict[str, list[bytes]] = {
+    ".pdf":  [b"%PDF"],
+    ".png":  [b"\x89PNG\r\n\x1a\n"],
+    ".jpg":  [b"\xff\xd8\xff"],
+    ".jpeg": [b"\xff\xd8\xff"],
+    ".gif":  [b"GIF87a", b"GIF89a"],
+    ".webp": [b"RIFF"],  # RIFF....WEBP
+    # Office Open XML (docx, xlsx, pptx) are ZIP-based
+    ".docx": [b"PK\x03\x04"],
+    ".xlsx": [b"PK\x03\x04"],
+    ".pptx": [b"PK\x03\x04"],
+    # Legacy OLE2 (doc, xls, ppt)
+    ".doc":  [b"\xd0\xcf\x11\xe0"],
+    ".xls":  [b"\xd0\xcf\x11\xe0"],
+    ".ppt":  [b"\xd0\xcf\x11\xe0"],
+}
 
 
 def _validate_upload(file: UploadFile, content: bytes) -> str:
-    """Validate file type and size. Returns the extension."""
+    """Validate file type, magic bytes, and size. Returns the extension."""
     ext = os.path.splitext(file.filename or "file")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(400, f"File too large ({len(content) / 1024 / 1024:.1f} MB). Max: {MAX_FILE_SIZE / 1024 / 1024:.0f} MB")
+    # Magic-byte check (skip for txt/csv which have no fixed signature)
+    signatures = _MAGIC_BYTES.get(ext)
+    if signatures and not any(content.startswith(sig) for sig in signatures):
+        raise HTTPException(400, f"File content does not match the '{ext}' extension (magic-byte mismatch)")
     return ext
 
 
@@ -107,6 +130,8 @@ async def upload_multiple_documents(
 ):
     """Upload multiple documents to Supabase Storage."""
     uid = get_user_id(auth)
+    if len(files) > 20:
+        raise HTTPException(400, "Maximum 20 files per upload")
     if scope not in ("global", "sender", "campaign_row"):
         raise HTTPException(400, "scope must be global, sender, or campaign_row")
 
@@ -158,10 +183,12 @@ def download_document(doc_id: str, db: Session = Depends(get_db), auth: dict = D
     except Exception as e:
         logger.error(f"Supabase download failed for {doc.file_path}: {e}")
         raise HTTPException(404, "File not found in storage")
+    # Sanitize filename for Content-Disposition header (strip path separators/control chars)
+    safe_name = os.path.basename(doc.original_name or "download").replace('"', "'")
     return Response(
         content=data,
         media_type=doc.mime_type,
-        headers={"Content-Disposition": f'attachment; filename="{doc.original_name}"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
 
 

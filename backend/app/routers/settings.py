@@ -1,5 +1,6 @@
 """Settings management router (per-user)."""
 import smtplib
+import ssl
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -66,13 +67,14 @@ def test_smtp(auth: dict = Depends(require_auth), db: Session = Depends(get_db))
     smtp_port_setting = db.query(Setting).filter(Setting.user_id == uid, Setting.key == "smtp_port").first()
 
     server = smtp_server_setting.value if smtp_server_setting else "smtp.gmail.com"
-    port = int(smtp_port_setting.value) if smtp_port_setting else 587
+    port = int(smtp_port_setting.value) if smtp_port_setting else 465
 
     try:
-        with smtplib.SMTP(server, port, timeout=10) as s:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(server, port, context=context, timeout=10) as s:
             s.ehlo()
-            s.starttls()
-            s.ehlo()
-        return {"ok": True, "message": f"Connected to {server}:{port} successfully"}
+        return {"ok": True, "message": f"Connected to {server}:{port} (SSL) successfully"}
     except Exception as e:
-        raise HTTPException(400, f"SMTP connection failed: {e}")
+        import logging
+        logging.getLogger("app.settings").error(f"SMTP test failed for {server}:{port}: {e}")
+        raise HTTPException(400, "SMTP connection failed. Check your server settings and try again.")

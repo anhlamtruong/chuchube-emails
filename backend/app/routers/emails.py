@@ -1,37 +1,79 @@
 """Email sending router — dispatches background tasks (no external broker)."""
-from datetime import datetime
+import asyncio
+import json
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.database import get_db
+from sse_starlette.sse import EventSourceResponse
+from app.database import get_db, SessionLocal
 from app.models.email_column import EmailColumn
 from app.models.job_result import JobResult
-from app.schemas.email_column import SendEmailsRequest, ScheduleEmailsRequest, RecurringScheduleRequest
+from app.models.user_profile import UserProfile
+from app.models.recruiter import Recruiter
+from app.models.referral import Referral
+from app.schemas.email_column import SendEmailsRequest, ScheduleEmailsRequest
 from app.logging_config import get_logger
 from app import config
-from app.auth import require_auth, get_user_id
+from app.auth import require_auth, get_user_id, get_user_role, is_admin_role, verify_clerk_token
 from app.routers.consent import require_consent
+
+from app.rate_limit import limiter
 
 logger = get_logger("emails")
 
 router = APIRouter(prefix="/api/emails", tags=["emails"])
 
+# Separate SSE router — uses query-param auth (EventSource can't set headers)
+sse_router = APIRouter(prefix="/api/emails", tags=["emails-sse"])
+
+
+def _upsert_user_profile(auth: dict, db: Session) -> None:
+    """Cache user_id → email mapping from the Clerk JWT for admin views."""
+    uid = get_user_id(auth)
+    email = auth.get("email") or auth.get("email_address")
+    name = auth.get("name") or auth.get("first_name")
+
+    existing = db.query(UserProfile).get(uid)
+    if existing:
+        if email and existing.email != email:
+            existing.email = email
+        if name and existing.name != name:
+            existing.name = name
+        existing.last_seen_at = datetime.now(timezone.utc)
+    else:
+        db.add(UserProfile(user_id=uid, email=email, name=name))
+    db.commit()
+
 
 @router.post("/send")
+@limiter.limit("30/minute")
 def send_emails(
     req: SendEmailsRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
+    auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
     _consent=Depends(require_consent),
 ):
     """Queue a batch email send via BackgroundTasks."""
     from app.background import send_email_batch
+    uid = get_user_id(auth)
+    _upsert_user_profile(auth, db)
 
     if not req.row_ids:
         raise HTTPException(400, "row_ids must not be empty")
 
-    jr = JobResult(status="queued", total=len(req.row_ids), row_ids=[str(rid) for rid in req.row_ids])
+    # Verify row ownership
+    owned = db.query(EmailColumn.id).filter(
+        EmailColumn.id.in_(req.row_ids), EmailColumn.user_id == uid
+    ).all()
+    owned_ids = {str(r.id) for r in owned}
+    if len(owned_ids) != len(req.row_ids):
+        raise HTTPException(403, "Some row_ids do not belong to you")
+
+    jr = JobResult(status="queued", total=len(req.row_ids), row_ids=[str(rid) for rid in req.row_ids], user_id=uid)
     db.add(jr)
     db.commit()
     db.refresh(jr)
@@ -41,10 +83,11 @@ def send_emails(
 
 
 @router.get("/status/{job_id}")
-def get_job_status(job_id: str, db: Session = Depends(get_db)):
+def get_job_status(job_id: str, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """Check the status of a send job from the job_results table."""
+    uid = get_user_id(auth)
     jr = db.query(JobResult).get(job_id)
-    if not jr:
+    if not jr or jr.user_id != uid:
         raise HTTPException(404, "Job not found")
     return {
         "job_id": jr.id,
@@ -62,10 +105,12 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)):
 def list_jobs(
     status: str | None = None,
     limit: int = 20,
+    auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """List recent send jobs (persistent, survives restarts)."""
-    q = db.query(JobResult).order_by(JobResult.created_at.desc())
+    uid = get_user_id(auth)
+    q = db.query(JobResult).filter(JobResult.user_id == uid).order_by(JobResult.created_at.desc())
     if status:
         q = q.filter(JobResult.status == status)
     results = q.limit(limit).all()
@@ -119,8 +164,11 @@ def list_senders(
 # --------------------------------------------------------------------------- #
 
 @router.post("/schedule")
+@limiter.limit("30/minute")
 def schedule_one_time(
     req: ScheduleEmailsRequest,
+    request: Request,
+    auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
     _consent=Depends(require_consent),
 ):
@@ -130,8 +178,17 @@ def schedule_one_time(
     `timezone` string (IANA, e.g. "America/New_York").  We convert to
     UTC and store the naive-UTC value in `scheduled_at`.
     """
+    uid = get_user_id(auth)
+    _upsert_user_profile(auth, db)
     if not req.row_ids:
         raise HTTPException(400, "row_ids must not be empty")
+
+    # Verify row ownership
+    owned = db.query(EmailColumn.id).filter(
+        EmailColumn.id.in_(req.row_ids), EmailColumn.user_id == uid
+    ).all()
+    if len(owned) != len(req.row_ids):
+        raise HTTPException(403, "Some row_ids do not belong to you")
 
     # Convert local time → UTC
     try:
@@ -148,7 +205,7 @@ def schedule_one_time(
         row.scheduled_at = utc_dt
 
     # Create persistent job result
-    jr = JobResult(status="scheduled", total=len(req.row_ids), row_ids=[str(rid) for rid in req.row_ids])
+    jr = JobResult(status="scheduled", total=len(req.row_ids), row_ids=[str(rid) for rid in req.row_ids], user_id=uid, scheduled_at=utc_dt)
     db.add(jr)
     db.commit()
     db.refresh(jr)
@@ -157,45 +214,19 @@ def schedule_one_time(
     return {"job_id": jr.id, "status": "scheduled", "run_at": utc_dt.isoformat() + "Z"}
 
 
-@router.post("/schedule/recurring")
-def schedule_recurring(
-    req: RecurringScheduleRequest,
-    db: Session = Depends(get_db),
-    _consent=Depends(require_consent),
-):
-    """Schedule emails on a recurring schedule by setting scheduled_at.
-
-    With Celery beat's check_due_rows running every minute, rows with
-    scheduled_at <= now will be picked up automatically.
-    """
-    if not req.row_ids:
-        raise HTTPException(400, "row_ids must not be empty")
-    if not req.cron:
-        raise HTTPException(400, "cron dict must not be empty")
-
-    # Convert cron hour/minute from the user's timezone to UTC
-    try:
-        tz = ZoneInfo(req.timezone)
-    except (KeyError, Exception):
-        raise HTTPException(400, f"Invalid timezone: {req.timezone}")
-
-    # For now, store cron config for reference.
-    # The background poller handles rows with scheduled_at <= now.
-    return {"status": "scheduled", "cron": req.cron, "timezone": req.timezone, "row_count": len(req.row_ids)}
-
-
 @router.get("/scheduled-jobs")
-def get_scheduled_jobs(db: Session = Depends(get_db)):
+def get_scheduled_jobs(auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """List active + finished jobs from the job_results table."""
+    uid = get_user_id(auth)
     active = (
         db.query(JobResult)
-        .filter(JobResult.status.in_(["queued", "scheduled", "running"]))
+        .filter(JobResult.user_id == uid, JobResult.status.in_(["queued", "scheduled", "running"]))
         .order_by(JobResult.created_at.desc())
         .all()
     )
     done = (
         db.query(JobResult)
-        .filter(JobResult.status.in_(["completed", "error", "cancelled"]))
+        .filter(JobResult.user_id == uid, JobResult.status.in_(["completed", "error", "cancelled"]))
         .order_by(JobResult.completed_at.desc())
         .limit(20)
         .all()
@@ -210,6 +241,7 @@ def get_scheduled_jobs(db: Session = Depends(get_db)):
             "sent": jr.sent,
             "failed": jr.failed,
             "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
+            "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
         }
         if include_completed_at:
             d["completed_at"] = (jr.completed_at.isoformat() + "Z") if jr.completed_at else None
@@ -222,27 +254,272 @@ def get_scheduled_jobs(db: Session = Depends(get_db)):
 
 
 @router.delete("/scheduled-jobs/{job_id}")
-def cancel_scheduled_job(job_id: str, db: Session = Depends(get_db)):
+def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """Cancel a scheduled/queued job."""
+    uid = get_user_id(auth)
     jr = db.query(JobResult).get(job_id)
-    if not jr:
+    if not jr or jr.user_id != uid:
         raise HTTPException(404, "Job not found")
     if jr.status not in ("queued", "scheduled"):
         raise HTTPException(400, f"Cannot cancel job in '{jr.status}' status")
 
-    # Clear scheduled_at on associated rows so the poller skips them
-    pending_rows = (
-        db.query(EmailColumn)
-        .filter(
-            EmailColumn.scheduled_at != None,  # noqa: E711
-            EmailColumn.sent_status == "pending",
+    # Clear scheduled_at only on rows belonging to THIS job
+    if jr.row_ids:
+        job_row_ids = [str(rid) for rid in jr.row_ids]
+        pending_rows = (
+            db.query(EmailColumn)
+            .filter(
+                EmailColumn.id.in_(job_row_ids),
+                EmailColumn.sent_status == "pending",
+            )
+            .all()
         )
-        .all()
-    )
-    for row in pending_rows:
-        row.scheduled_at = None
+        for row in pending_rows:
+            row.scheduled_at = None
 
     jr.status = "cancelled"
     db.commit()
     return {"job_id": jr.id, "status": "cancelled"}
+
+
+# --------------------------------------------------------------------------- #
+# Job detail endpoint                                                          #
+# --------------------------------------------------------------------------- #
+
+@router.get("/jobs/{job_id}/detail")
+def get_job_detail(job_id: str, auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Get full job detail including per-email status for the Job Detail page."""
+    uid = get_user_id(auth)
+    role = get_user_role(uid, db)
+    jr = db.query(JobResult).get(job_id)
+    if not jr:
+        raise HTTPException(404, "Job not found")
+    # Admin can view any job; regular user can only view own
+    if not is_admin_role(role) and jr.user_id != uid:
+        raise HTTPException(404, "Job not found")
+
+    # Resolve owner email for admin badge
+    owner_email = None
+    if is_admin_role(role) and jr.user_id:
+        from app.models.user_profile import UserProfile
+        profile = db.query(UserProfile).get(jr.user_id)
+        owner_email = profile.email if profile else jr.user_id
+
+    emails = []
+    if jr.row_ids:
+        rows = (
+            db.query(EmailColumn)
+            .filter(EmailColumn.id.in_([str(rid) for rid in jr.row_ids]))
+            .all()
+        )
+        # Build a map to preserve original order from row_ids
+        row_map = {str(r.id): r for r in rows}
+        for rid in jr.row_ids:
+            r = row_map.get(str(rid))
+            if r:
+                emails.append({
+                    "id": str(r.id),
+                    "recipient_name": r.recipient_name or "",
+                    "recipient_email": r.recipient_email or "",
+                    "company": r.company or "",
+                    "position": r.position or "",
+                    "sender_email": r.sender_email or "",
+                    "template_file": r.template_file or "",
+                    "sent_status": r.sent_status or "pending",
+                    "sent_at": (r.sent_at.isoformat() + "Z") if r.sent_at else None,
+                })
+
+    return {
+        "job_id": jr.id,
+        "status": jr.status,
+        "total": jr.total,
+        "sent": jr.sent,
+        "failed": jr.failed,
+        "errors": jr.errors or [],
+        "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
+        "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
+        "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+        "emails": emails,
+        "owner_email": owner_email,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# OOO re-send suggestions                                                      #
+# --------------------------------------------------------------------------- #
+
+@router.get("/ooo-resendable")
+def ooo_resendable(auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+    """Return sent emails whose recipient is currently OOO and was emailed before their return date.
+
+    This helps users identify emails that were likely missed due to OOO and
+    suggests re-sending after the contact returns.
+    """
+    uid = get_user_id(auth)
+
+    results = []
+
+    # Search EmailColumn rows that were sent by this user, linked to an OOO contact
+    for ContactModel, fk_field in [(Recruiter, "recruiter_id"), (Referral, "referral_id")]:
+        fk_col = getattr(EmailColumn, fk_field)
+        rows = (
+            db.query(EmailColumn, ContactModel)
+            .join(ContactModel, fk_col == ContactModel.id)
+            .filter(
+                EmailColumn.user_id == uid,
+                EmailColumn.sent_status == "sent",
+                ContactModel.email_status == "ooo",
+                ContactModel.ooo_return_date != None,  # noqa: E711
+            )
+            .all()
+        )
+        for ec, contact in rows:
+            results.append({
+                "email_column_id": str(ec.id),
+                "recipient_name": ec.recipient_name,
+                "recipient_email": ec.recipient_email,
+                "company": ec.company or contact.company,
+                "sender_email": ec.sender_email,
+                "template_file": ec.template_file,
+                "sent_at": ec.sent_at.isoformat() + "Z" if ec.sent_at else None,
+                "ooo_return_date": contact.ooo_return_date.isoformat() if contact.ooo_return_date else None,
+                "contact_type": "recruiter" if fk_field == "recruiter_id" else "referral",
+                "contact_id": str(contact.id),
+            })
+
+    # Sort by OOO return date ascending (soonest returns first)
+    results.sort(key=lambda r: r["ooo_return_date"] or "")
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# SSE streams for real-time progress                                           #
+# --------------------------------------------------------------------------- #
+
+def _verify_sse_token(token: str) -> tuple[str, bool]:
+    """Verify a Clerk JWT passed as a query param. Returns (user_id, is_admin).
+
+    Delegates to the shared helper in app.services.sse_auth.
+    """
+    from app.services.sse_auth import verify_sse_token
+    return verify_sse_token(token)
+
+
+@sse_router.get("/jobs/{job_id}/stream")
+async def job_stream(request: Request, job_id: str, token: str = Query(...)):
+    """SSE stream of per-email + job-level events for a specific job.
+
+    Uses token query param since EventSource cannot set headers.
+    """
+    uid, admin = _verify_sse_token(token)
+
+    # Verify the job belongs to this user (admin can access any)
+    db = SessionLocal()
+    try:
+        jr = db.query(JobResult).get(job_id)
+        if not jr:
+            raise HTTPException(404, "Job not found")
+        if not admin and jr.user_id != uid:
+            raise HTTPException(404, "Job not found")
+        is_terminal = jr.status in ("completed", "error", "cancelled")
+    finally:
+        db.close()
+
+    # If job is already done, send a single finished event and close
+    if is_terminal:
+        async def done_gen():
+            yield {
+                "event": "job_finished",
+                "data": json.dumps({
+                    "job_id": job_id, "status": jr.status,
+                    "sent": jr.sent, "failed": jr.failed, "total": jr.total,
+                    "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+                }),
+            }
+        return EventSourceResponse(done_gen())
+
+    from app.background import subscribe_job, unsubscribe_job
+    q = subscribe_job(job_id)
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=1.0)
+                    yield {
+                        "event": event["event"],
+                        "data": json.dumps(event["data"]),
+                    }
+                    # Close the stream once the job is finished
+                    if event["event"] == "job_finished":
+                        break
+                except asyncio.TimeoutError:
+                    # Send keepalive comment to prevent connection timeout
+                    yield {"comment": "keepalive"}
+        finally:
+            unsubscribe_job(job_id, q)
+
+    return EventSourceResponse(event_generator())
+
+
+@sse_router.get("/jobs/stream")
+async def global_job_stream(request: Request, token: str = Query(...)):
+    """SSE stream of job-level events for all jobs belonging to the user.
+
+    Lightweight — only sends job_update, job_started, and job_finished events
+    (no per-email detail). Powers ScheduledJobsPage and Dashboard live updates.
+    Admin users receive events for ALL jobs (no ownership filter).
+    """
+    uid, admin = _verify_sse_token(token)
+
+    from app.background import subscribe_global, unsubscribe_global
+    q = subscribe_global()
+
+    # Pre-load the set of job IDs owned by this user to avoid a DB query per
+    # event.  Refresh periodically so new jobs are picked up.
+    import time as _time
+
+    def _load_user_job_ids(user_id: str) -> set[str]:
+        db = SessionLocal()
+        try:
+            ids = db.query(JobResult.id).filter(JobResult.user_id == user_id).all()
+            return {str(r[0]) for r in ids}
+        finally:
+            db.close()
+
+    _user_jobs = set() if admin else _load_user_job_ids(uid)
+    _last_refresh = _time.monotonic()
+    _REFRESH_INTERVAL = 30  # seconds
+
+    async def event_generator():
+        nonlocal _user_jobs, _last_refresh
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15.0)
+                    # Admin sees all events; regular users only see their own
+                    if not admin:
+                        # Refresh the cache periodically
+                        now = _time.monotonic()
+                        if now - _last_refresh > _REFRESH_INTERVAL:
+                            _user_jobs = _load_user_job_ids(uid)
+                            _last_refresh = now
+                        job_id = event.get("data", {}).get("job_id")
+                        if job_id and str(job_id) not in _user_jobs:
+                            # Also add to cache on-the-fly for newly started jobs
+                            continue
+                    yield {
+                        "event": event["event"],
+                        "data": json.dumps(event["data"]),
+                    }
+                except asyncio.TimeoutError:
+                    yield {"comment": "keepalive"}
+        finally:
+            unsubscribe_global(q)
+
+    return EventSourceResponse(event_generator())
 

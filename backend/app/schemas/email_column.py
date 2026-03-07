@@ -1,5 +1,5 @@
 from datetime import datetime, timezone as tz
-from pydantic import BaseModel, model_serializer
+from pydantic import BaseModel, EmailStr, Field, model_serializer
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
@@ -10,17 +10,17 @@ def _utc_iso(dt: datetime | None) -> str | None:
 
 
 class EmailColumnBase(BaseModel):
-    sender_email: str = ""
-    recipient_name: str = ""
-    recipient_email: str = ""
-    company: str = ""
-    position: str = ""
-    template_file: str = ""
-    framework: str = ""
-    my_strength: str = ""
-    audience_value: str = ""
+    sender_email: EmailStr | str = Field("", max_length=500)
+    recipient_name: str = Field("", max_length=500)
+    recipient_email: EmailStr | str = Field("", max_length=500)
+    company: str = Field("", max_length=500)
+    position: str = Field("", max_length=500)
+    template_file: str = Field("", max_length=500)
+    framework: str = Field("", max_length=500)
+    my_strength: str = Field("", max_length=2000)
+    audience_value: str = Field("", max_length=2000)
     custom_fields: dict | None = None
-    sent_status: str = "pending"
+    sent_status: str = Field("pending", max_length=50)
     scheduled_at: datetime | None = None
     recruiter_id: str | None = None
     referral_id: str | None = None
@@ -31,9 +31,9 @@ class EmailColumnCreate(EmailColumnBase):
 
 
 class EmailColumnUpdate(BaseModel):
-    sender_email: str | None = None
+    sender_email: EmailStr | str | None = None
     recipient_name: str | None = None
-    recipient_email: str | None = None
+    recipient_email: EmailStr | str | None = None
     company: str | None = None
     position: str | None = None
     template_file: str | None = None
@@ -83,16 +83,10 @@ class EmailColumnOut(EmailColumnBase):
 
 
 class SendEmailsRequest(BaseModel):
-    row_ids: list[str]
+    row_ids: list[str] = Field(..., max_length=500)  # max 500 rows per send
 
 
 class ScheduleEmailsRequest(BaseModel):
-    row_ids: list[str]
+    row_ids: list[str] = Field(..., max_length=500)
     run_at: datetime  # Local datetime (interpreted in the given timezone)
-    timezone: str = "UTC"  # IANA timezone, e.g. "America/New_York"
-
-
-class RecurringScheduleRequest(BaseModel):
-    row_ids: list[str]
-    cron: dict  # e.g. {"hour": 9, "minute": 0, "day_of_week": "mon-fri"}
-    timezone: str = "UTC"  # IANA timezone
+    timezone: str = Field("UTC", max_length=100)  # IANA timezone, e.g. "America/New_York"

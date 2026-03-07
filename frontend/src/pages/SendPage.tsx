@@ -1,14 +1,21 @@
-import { useEffect, useState, useCallback } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  type MouseEvent,
+} from "react";
 import {
   getCampaigns,
   sendEmails,
-  getJobStatus,
   scheduleEmails,
-  scheduleRecurring,
   getConsentStatus,
   bulkUpdateCampaigns,
 } from "@/api/client";
 import type { Campaign } from "@/api/client";
+import { usePageTitle } from "@/hooks/usePageTitle";
+import { useJobSSE } from "@/hooks/useJobSSE";
+import type { JobUpdateEvent } from "@/hooks/useJobSSE";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,9 +50,12 @@ import {
   AlertTriangle,
   RotateCcw,
   Loader2,
+  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { useShiftSelect } from "@/hooks/useShiftSelect";
+import { getOooResendable, type OooResendable } from "@/api/emails";
 
 type ScheduleMode = "none" | "one-time" | "recurring";
 
@@ -85,19 +95,20 @@ function detectTimezone(): string {
   }
 }
 
-const DAY_OPTIONS = [
-  { value: "mon", label: "Mon" },
-  { value: "tue", label: "Tue" },
-  { value: "wed", label: "Wed" },
-  { value: "thu", label: "Thu" },
-  { value: "fri", label: "Fri" },
-  { value: "sat", label: "Sat" },
-  { value: "sun", label: "Sun" },
-];
-
 export default function SendPage() {
+  usePageTitle("Send Emails");
   const [rows, setRows] = useState<Campaign[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const {
+    selected: selectedIds,
+    toggle: shiftToggle,
+    selectAll: hookSelectAll,
+    deselectAll,
+    selectByFilter,
+    invertSelection,
+    replaceSelection,
+  } = useShiftSelect();
+  // Separate lastClickedIndex for the failed table so shift-click is independent
+  const failedLastIdx = useRef<number | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<{
     status: string;
@@ -111,42 +122,52 @@ export default function SendPage() {
   const [consentOk, setConsentOk] = useState<boolean | null>(null);
   const [failedRows, setFailedRows] = useState<Campaign[]>([]);
   const [retrying, setRetrying] = useState(false);
+  const [oooResendable, setOooResendable] = useState<OooResendable[]>([]);
 
   // --- scheduling state ---
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("none");
   const [runAt, setRunAt] = useState("");
   const [timezone, setTimezone] = useState(detectTimezone);
-  const [cronHour, setCronHour] = useState("9");
-  const [cronMinute, setCronMinute] = useState("0");
-  const [cronDays, setCronDays] = useState<string[]>([
-    "mon",
-    "tue",
-    "wed",
-    "thu",
-    "fri",
-  ]);
 
   const load = useCallback(async () => {
-    const params: Record<string, string | number> = { per_page: 500 };
-    if (filter === "pending") params.sent_status = "pending";
-    if (filter === "failed") params.sent_status = "failed";
-    const { items } = await getCampaigns(params);
-    setRows(items);
+    try {
+      const params: Record<string, string | number> = { per_page: 500 };
+      if (filter === "pending") params.sent_status = "pending";
+      if (filter === "failed") params.sent_status = "failed";
+      const { items } = await getCampaigns(params);
+      setRows(items);
+    } catch {
+      toast.error("Failed to load campaigns");
+    }
   }, [filter]);
 
   // Always load failed count
   const loadFailed = useCallback(async () => {
-    const { items } = await getCampaigns({
-      sent_status: "failed",
-      per_page: 500,
-    });
-    setFailedRows(items);
+    try {
+      const { items } = await getCampaigns({
+        sent_status: "failed",
+        per_page: 500,
+      });
+      setFailedRows(items);
+    } catch {
+      /* non-critical — failed tab just stays empty */
+    }
+  }, []);
+
+  const loadOooResendable = useCallback(async () => {
+    try {
+      const data = await getOooResendable();
+      setOooResendable(data);
+    } catch {
+      /* non-critical */
+    }
   }, []);
 
   useEffect(() => {
     load();
     loadFailed();
-  }, [load, loadFailed]);
+    loadOooResendable();
+  }, [load, loadFailed, loadOooResendable]);
 
   // Check consent status
   useEffect(() => {
@@ -155,44 +176,103 @@ export default function SendPage() {
       .catch(() => setConsentOk(false));
   }, []);
 
-  // Poll job status
-  useEffect(() => {
-    if (!jobId) return;
-    const interval = setInterval(async () => {
-      try {
-        const status = await getJobStatus(jobId);
-        setJobStatus(status);
-        if (status.status === "completed" || status.status === "error") {
-          clearInterval(interval);
-          load();
-          loadFailed();
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [jobId, load]);
+  // SSE: real-time job status (replaces polling)
+  const isTerminal = jobStatus
+    ? ["completed", "error", "cancelled"].includes(jobStatus.status)
+    : true;
 
-  const toggleSelect = (id: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIds(next);
+  useJobSSE({
+    jobId: jobId ?? undefined,
+    enabled: !!jobId && !isTerminal,
+    onJobUpdate: useCallback((data: JobUpdateEvent) => {
+      setJobStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: data.status,
+              sent: data.sent,
+              failed: data.failed,
+            }
+          : {
+              status: data.status,
+              total: data.total ?? 0,
+              sent: data.sent,
+              failed: data.failed,
+              errors: [],
+            },
+      );
+    }, []),
+    onJobFinished: useCallback(
+      (data: JobUpdateEvent) => {
+        setJobStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: data.status,
+                sent: data.sent,
+                failed: data.failed,
+              }
+            : {
+                status: data.status,
+                total: data.total ?? 0,
+                sent: data.sent,
+                failed: data.failed,
+                errors: [],
+              },
+        );
+        load();
+        loadFailed();
+        if (data.status === "completed") {
+          toast.success(`Done: ${data.sent} sent, ${data.failed} failed`);
+        }
+      },
+      [load, loadFailed],
+    ),
+  });
+
+  const handleRowClick = (e: MouseEvent, id: string, index: number) => {
+    const ids = rows.map((r) => r.id);
+    shiftToggle(id, index, e.shiftKey, ids);
+  };
+
+  const handleFailedRowClick = (e: MouseEvent, id: string, index: number) => {
+    // Shift-click range within the failed table only
+    const ids = failedRows.map((r) => r.id);
+    if (e.shiftKey && failedLastIdx.current !== null) {
+      const start = Math.min(failedLastIdx.current, index);
+      const end = Math.max(failedLastIdx.current, index);
+      const adding = !selectedIds.has(id);
+      const next = new Set(selectedIds);
+      for (let i = start; i <= end; i++) {
+        if (adding) next.add(ids[i]);
+        else next.delete(ids[i]);
+      }
+      replaceSelection(Array.from(next));
+    } else {
+      shiftToggle(id, index, false, ids);
+    }
+    failedLastIdx.current = index;
   };
 
   const selectAll = () => {
     if (selectedIds.size === rows.length) {
-      setSelectedIds(new Set());
+      deselectAll();
     } else {
-      setSelectedIds(new Set(rows.map((r) => r.id)));
+      hookSelectAll(rows.map((r) => r.id));
     }
   };
 
   const selectAllFailed = () => {
-    setSelectedIds(new Set(failedRows.map((r) => r.id)));
-    // Switch to failed view so user can see them
+    replaceSelection(failedRows.map((r) => r.id));
     if (filter !== "failed" && filter !== "all") setFilter("failed");
+  };
+
+  const selectAllPending = () => {
+    selectByFilter(rows, (r) => r.sent_status === "pending");
+  };
+
+  const handleInvert = () => {
+    invertSelection(rows.map((r) => r.id));
   };
 
   const retryFailed = async (ids?: string[]) => {
@@ -208,7 +288,7 @@ export default function SendPage() {
         targetIds.map((id) => ({ id, sent_status: "pending" })),
       );
       toast.success(`Reset ${targetIds.length} email(s) to pending`);
-      setSelectedIds(new Set());
+      deselectAll();
       await Promise.all([load(), loadFailed()]);
     } catch {
       toast.error("Failed to reset emails");
@@ -239,19 +319,13 @@ export default function SendPage() {
         failed: 0,
         errors: [],
       });
-      setSelectedIds(new Set());
+      deselectAll();
       toast.success(`Retrying ${targetIds.length} email(s)`);
     } catch {
       toast.error("Failed to retry emails");
     } finally {
       setRetrying(false);
     }
-  };
-
-  const toggleDay = (day: string) => {
-    setCronDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
-    );
   };
 
   const doSend = async () => {
@@ -289,18 +363,6 @@ export default function SendPage() {
         toast.success(
           `Scheduled ${ids.length} email(s) for ${new Date(result.run_at).toLocaleString()}`,
         );
-      } else if (scheduleMode === "recurring") {
-        if (cronDays.length === 0) {
-          toast.error("Select at least one day");
-          return;
-        }
-        const cron = {
-          hour: parseInt(cronHour),
-          minute: parseInt(cronMinute),
-          day_of_week: cronDays.join(","),
-        };
-        const result = await scheduleRecurring(ids, cron, timezone);
-        toast.success(`Recurring schedule created (job ${result.job_id})`);
       }
       load();
     } catch {
@@ -376,6 +438,12 @@ export default function SendPage() {
             <option value="failed">Failed only</option>
             <option value="all">All rows</option>
           </select>
+          <Button size="sm" variant="outline" onClick={selectAllPending}>
+            Select Pending
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleInvert}>
+            Invert
+          </Button>
           <Button size="sm" variant="outline" onClick={load}>
             <RefreshCw size={14} /> Refresh
           </Button>
@@ -443,6 +511,11 @@ export default function SendPage() {
                       : m === "one-time"
                         ? "One-time"
                         : "Recurring"}
+                    {m === "recurring" && (
+                      <span className="ml-1 text-[10px] bg-muted text-muted-foreground rounded px-1 py-0.5 leading-none">
+                        Soon
+                      </span>
+                    )}
                   </Button>
                 ),
               )}
@@ -481,70 +554,14 @@ export default function SendPage() {
               </div>
             )}
 
-            {/* Recurring picker */}
+            {/* Recurring picker — coming soon */}
             {scheduleMode === "recurring" && (
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">At</span>
-                  <select
-                    value={cronHour}
-                    onChange={(e) => setCronHour(e.target.value)}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <option key={i} value={i}>
-                        {String(i).padStart(2, "0")}
-                      </option>
-                    ))}
-                  </select>
-                  <span>:</span>
-                  <select
-                    value={cronMinute}
-                    onChange={(e) => setCronMinute(e.target.value)}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {[0, 15, 30, 45].map((m) => (
-                      <option key={m} value={m}>
-                        {String(m).padStart(2, "0")}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-muted-foreground">on</span>
-                </div>
-                <div className="flex gap-1">
-                  {DAY_OPTIONS.map(({ value, label }) => (
-                    <Button
-                      key={value}
-                      size="sm"
-                      variant={cronDays.includes(value) ? "default" : "outline"}
-                      className="px-2 h-7 text-xs"
-                      onClick={() => toggleDay(value)}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Globe size={14} className="text-muted-foreground" />
-                  <select
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {TIMEZONE_OPTIONS.map((tz) => (
-                      <option key={tz} value={tz}>
-                        {tz.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={handleSchedule}
-                  disabled={selectedIds.size === 0 || consentOk !== true}
-                >
-                  <Repeat size={14} /> Schedule ({selectedIds.size})
-                </Button>
+              <div className="flex items-center gap-3 rounded-md border border-dashed border-muted-foreground/30 px-4 py-3">
+                <Repeat size={16} className="text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
+                  Recurring schedules are <b>coming soon</b>. Use one-time
+                  scheduling for now.
+                </span>
               </div>
             )}
           </div>
@@ -590,6 +607,16 @@ export default function SendPage() {
                     {e}
                   </p>
                 ))}
+              </div>
+            )}
+            {jobId && (
+              <div className="mt-3">
+                <Link
+                  to={`/scheduled-jobs/${jobId}`}
+                  className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  View full details &rarr;
+                </Link>
               </div>
             )}
           </CardContent>
@@ -652,17 +679,13 @@ export default function SendPage() {
                             selectedIds.has(r.id),
                           );
                           if (allSelected) {
-                            setSelectedIds((prev) => {
-                              const next = new Set(prev);
-                              failedRows.forEach((r) => next.delete(r.id));
-                              return next;
-                            });
+                            const next = new Set(selectedIds);
+                            failedRows.forEach((r) => next.delete(r.id));
+                            replaceSelection(Array.from(next));
                           } else {
-                            setSelectedIds((prev) => {
-                              const next = new Set(prev);
-                              failedRows.forEach((r) => next.add(r.id));
-                              return next;
-                            });
+                            const next = new Set(selectedIds);
+                            failedRows.forEach((r) => next.add(r.id));
+                            replaceSelection(Array.from(next));
                           }
                         }}
                         className="rounded"
@@ -676,13 +699,23 @@ export default function SendPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {failedRows.map((r) => (
-                    <TableRow key={r.id}>
+                  {failedRows.map((r, idx) => (
+                    <TableRow
+                      key={r.id}
+                      className={`cursor-pointer ${selectedIds.has(r.id) ? "bg-primary/5" : ""}`}
+                      onClick={(e) => handleFailedRowClick(e, r.id, idx)}
+                    >
                       <TableCell>
                         <input
                           type="checkbox"
                           checked={selectedIds.has(r.id)}
-                          onChange={() => toggleSelect(r.id)}
+                          onChange={(e) =>
+                            handleFailedRowClick(
+                              e as unknown as MouseEvent,
+                              r.id,
+                              idx,
+                            )
+                          }
                           className="rounded"
                         />
                       </TableCell>
@@ -711,6 +744,76 @@ export default function SendPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* OOO re-send suggestions */}
+      {oooResendable.length > 0 && (
+        <Card className="border-blue-500/50 bg-blue-500/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-blue-700">
+              <MessageSquare size={16} />
+              OOO — Suggest Re-send ({oooResendable.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
+              These emails were sent to contacts currently out of office.
+              Consider re-scheduling them after the contact returns.
+            </p>
+            <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Sent At</TableHead>
+                    <TableHead>Returns</TableHead>
+                    <TableHead>Type</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {oooResendable.map((r) => (
+                    <TableRow key={r.email_column_id}>
+                      <TableCell className="font-medium">
+                        {r.recipient_name}
+                      </TableCell>
+                      <TableCell>{r.recipient_email}</TableCell>
+                      <TableCell>{r.company}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {r.sent_at
+                          ? new Date(r.sent_at).toLocaleDateString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-blue-700"
+                        >
+                          {r.ooo_return_date
+                            ? new Date(
+                                r.ooo_return_date + "T00:00:00",
+                              ).toLocaleDateString()
+                            : "Unknown"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="capitalize text-xs text-muted-foreground">
+                        {r.contact_type}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Shift-click hint */}
+      <p className="text-[10px] text-muted-foreground/70">
+        💡 Hold{" "}
+        <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Shift</kbd> +
+        click to select a range
+      </p>
 
       {/* Email rows table */}
       <Card>
@@ -753,13 +856,19 @@ export default function SendPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((r) => (
-                  <TableRow key={r.id}>
+                rows.map((r, idx) => (
+                  <TableRow
+                    key={r.id}
+                    className={`cursor-pointer ${selectedIds.has(r.id) ? "bg-primary/5" : ""}`}
+                    onClick={(e) => handleRowClick(e, r.id, idx)}
+                  >
                     <TableCell>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(r.id)}
-                        onChange={() => toggleSelect(r.id)}
+                        onChange={(e) =>
+                          handleRowClick(e as unknown as MouseEvent, r.id, idx)
+                        }
                         className="rounded"
                       />
                     </TableCell>

@@ -23,5 +23,6 @@ class SenderAccount(Base):
     organization_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "school" | "company"
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     city: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    last_bounce_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -1,12 +1,25 @@
+import html as _html
 import os
 import re
 
+# Placeholder keys whose values are trusted HTML and must NOT be escaped.
+_RAW_HTML_FIELDS: set[str] = {"dynamic_image_tag"}
+
 
 def safe_substitute(template: str, replacements: dict) -> str:
-    """Replace {placeholder} tokens using regex so CSS braces are left alone."""
+    """Replace {placeholder} tokens using regex so CSS braces are left alone.
+
+    All replacement values are HTML-escaped to prevent injection, except
+    keys listed in ``_RAW_HTML_FIELDS``.
+    """
     def _replacer(m: re.Match) -> str:
         key = m.group(1)
-        return str(replacements.get(key, m.group(0)))
+        value = replacements.get(key)
+        if value is None:
+            return m.group(0)  # keep unknown placeholders
+        if key in _RAW_HTML_FIELDS:
+            return str(value)
+        return _html.escape(str(value))
     return re.sub(r"\{(\w+)\}", _replacer, template)
 
 
@@ -22,7 +35,12 @@ def load_template(template_folder, template_file):
         (str, str) or (None, None): A tuple of (subject, body), or (None, None) on error.
     """
     try:
-        template_path = os.path.join(template_folder, template_file)
+        # Path traversal protection: ensure resolved path stays inside template_folder
+        base = os.path.realpath(template_folder)
+        template_path = os.path.realpath(os.path.join(template_folder, template_file))
+        if not template_path.startswith(base + os.sep) and template_path != base:
+            print(f"Error: Template path escapes the template folder: {template_file!r}")
+            return None, None
         with open(template_path, 'r', encoding='utf-8') as f:
             full_content = f.read()
         

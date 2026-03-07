@@ -9,9 +9,22 @@ interface DialogProps {
 }
 
 function Dialog({ open, onOpenChange, children }: DialogProps) {
+  // Close on Escape key
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onOpenChange(false);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onOpenChange]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
@@ -26,27 +39,43 @@ function Dialog({ open, onOpenChange, children }: DialogProps) {
 const DialogContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & { onClose?: () => void }
->(({ className, children, onClose, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "relative z-50 w-full max-w-lg rounded-xl border bg-background p-6 shadow-lg animate-in fade-in-0 zoom-in-95",
-      className,
-    )}
-    onClick={(e) => e.stopPropagation()}
-    {...props}
-  >
-    {children}
-    {onClose && (
-      <button
-        onClick={onClose}
-        className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none cursor-pointer"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    )}
-  </div>
-));
+>(({ className, children, onClose, ...props }, ref) => {
+  const innerRef = React.useRef<HTMLDivElement>(null);
+  const resolvedRef = (ref as React.RefObject<HTMLDivElement>) || innerRef;
+
+  // Trap focus inside dialog content
+  React.useEffect(() => {
+    const el = resolvedRef.current;
+    if (!el) return;
+    const focusable = el.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length > 0) focusable[0].focus();
+  }, [resolvedRef]);
+
+  return (
+    <div
+      ref={resolvedRef}
+      className={cn(
+        "relative z-50 w-full max-w-lg rounded-xl border bg-background p-6 shadow-lg animate-in fade-in-0 zoom-in-95",
+        className,
+      )}
+      onClick={(e) => e.stopPropagation()}
+      {...props}
+    >
+      {children}
+      {onClose && (
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none cursor-pointer"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+});
 DialogContent.displayName = "DialogContent";
 
 const DialogHeader = ({

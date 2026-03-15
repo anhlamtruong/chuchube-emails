@@ -51,6 +51,7 @@ import {
   RotateCcw,
   Loader2,
   MessageSquare,
+  CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -123,6 +124,8 @@ export default function SendPage() {
   const [failedRows, setFailedRows] = useState<Campaign[]>([]);
   const [retrying, setRetrying] = useState(false);
   const [oooResendable, setOooResendable] = useState<OooResendable[]>([]);
+  const [oooSelected, setOooSelected] = useState<Set<string>>(new Set());
+  const [oooScheduling, setOooScheduling] = useState(false);
 
   // --- scheduling state ---
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("none");
@@ -759,10 +762,134 @@ export default function SendPage() {
               These emails were sent to contacts currently out of office.
               Consider re-scheduling them after the contact returns.
             </p>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (oooSelected.size === oooResendable.length) {
+                    setOooSelected(new Set());
+                  } else {
+                    setOooSelected(
+                      new Set(oooResendable.map((r) => r.email_column_id)),
+                    );
+                  }
+                }}
+              >
+                {oooSelected.size === oooResendable.length
+                  ? "Deselect All"
+                  : `Select All (${oooResendable.length})`}
+              </Button>
+              <Button
+                size="sm"
+                disabled={
+                  oooSelected.size === 0 ||
+                  oooScheduling ||
+                  consentOk !== true
+                }
+                onClick={async () => {
+                  setOooScheduling(true);
+                  try {
+                    const selected = oooResendable.filter((r) =>
+                      oooSelected.has(r.email_column_id),
+                    );
+
+                    // Group by ooo_return_date
+                    const groups = new Map<string, string[]>();
+                    const noDateIds: string[] = [];
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+
+                    for (const r of selected) {
+                      if (!r.ooo_return_date) {
+                        noDateIds.push(r.email_column_id);
+                        continue;
+                      }
+                      const returnDate = new Date(
+                        r.ooo_return_date + "T00:00:00",
+                      );
+                      // If return date is today or past, schedule for tomorrow
+                      const schedDate =
+                        returnDate <= today
+                          ? new Date(
+                              today.getTime() + 24 * 60 * 60 * 1000,
+                            )
+                          : returnDate;
+                      const key = schedDate.toISOString().split("T")[0];
+                      const existing = groups.get(key) || [];
+                      existing.push(r.email_column_id);
+                      groups.set(key, existing);
+                    }
+
+                    // Also group no-date rows into tomorrow
+                    if (noDateIds.length > 0) {
+                      const tomorrow = new Date(
+                        today.getTime() + 24 * 60 * 60 * 1000,
+                      );
+                      const key = tomorrow.toISOString().split("T")[0];
+                      const existing = groups.get(key) || [];
+                      existing.push(...noDateIds);
+                      groups.set(key, existing);
+                    }
+
+                    // Reset to pending + schedule each group
+                    const allIds = selected.map((r) => r.email_column_id);
+                    await bulkUpdateCampaigns(
+                      allIds.map((id) => ({ id, sent_status: "pending" })),
+                    );
+
+                    let totalScheduled = 0;
+                    for (const [dateStr, ids] of groups) {
+                      const runAtStr = `${dateStr}T09:00:00`;
+                      await scheduleEmails(ids, runAtStr, timezone);
+                      totalScheduled += ids.length;
+                    }
+
+                    toast.success(
+                      `Scheduled ${totalScheduled} re-send(s) across ${groups.size} date(s)`,
+                    );
+                    setOooSelected(new Set());
+                    await Promise.all([load(), loadFailed(), loadOooResendable()]);
+                  } catch {
+                    toast.error("Failed to schedule OOO re-sends");
+                  } finally {
+                    setOooScheduling(false);
+                  }
+                }}
+              >
+                {oooScheduling ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <CalendarClock size={14} />
+                )}
+                Schedule Re-send ({oooSelected.size})
+              </Button>
+            </div>
             <div className="max-h-64 overflow-y-auto rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        checked={
+                          oooResendable.length > 0 &&
+                          oooSelected.size === oooResendable.length
+                        }
+                        onChange={() => {
+                          if (oooSelected.size === oooResendable.length) {
+                            setOooSelected(new Set());
+                          } else {
+                            setOooSelected(
+                              new Set(
+                                oooResendable.map((r) => r.email_column_id),
+                              ),
+                            );
+                          }
+                        }}
+                        className="rounded"
+                      />
+                    </TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Company</TableHead>
@@ -773,7 +900,43 @@ export default function SendPage() {
                 </TableHeader>
                 <TableBody>
                   {oooResendable.map((r) => (
-                    <TableRow key={r.email_column_id}>
+                    <TableRow
+                      key={r.email_column_id}
+                      className={`cursor-pointer ${
+                        oooSelected.has(r.email_column_id)
+                          ? "bg-blue-500/5"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        setOooSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(r.email_column_id)) {
+                            next.delete(r.email_column_id);
+                          } else {
+                            next.add(r.email_column_id);
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={oooSelected.has(r.email_column_id)}
+                          onChange={() => {
+                            setOooSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.email_column_id)) {
+                                next.delete(r.email_column_id);
+                              } else {
+                                next.add(r.email_column_id);
+                              }
+                              return next;
+                            });
+                          }}
+                          className="rounded"
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">
                         {r.recipient_name}
                       </TableCell>

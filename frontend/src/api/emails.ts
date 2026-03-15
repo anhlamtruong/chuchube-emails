@@ -128,6 +128,7 @@ export interface JobDetail {
   created_at: string | null;
   scheduled_at: string | null;
   completed_at: string | null;
+  parent_job_id: string | null;
   emails: JobEmail[];
   owner_email?: string | null;
 }
@@ -161,6 +162,44 @@ export const cancelScheduledJob = (jobId: string) =>
 
 export const getJobDetail = (jobId: string) =>
   api.get<JobDetail>(`/emails/jobs/${jobId}/detail`).then((r) => r.data);
+
+export const rerunJob = (jobId: string) =>
+  api
+    .post<{
+      job_id: string;
+      status: string;
+      total: number;
+      parent_job_id: string;
+    }>(`/emails/jobs/${jobId}/rerun`)
+    .then((r) => r.data);
+
+export const rescheduleJob = (
+  jobId: string,
+  runAt: string,
+  timezone: string = "UTC",
+) =>
+  api
+    .post<{
+      job_id: string;
+      status: string;
+      run_at: string;
+      total: number;
+      parent_job_id: string;
+    }>(`/emails/jobs/${jobId}/reschedule`, {
+      run_at: runAt,
+      timezone,
+    })
+    .then((r) => r.data);
+
+export const cloneJob = (jobId: string) =>
+  api
+    .post<{
+      job_id: string;
+      status: string;
+      total: number;
+      parent_job_id: string;
+    }>(`/emails/jobs/${jobId}/clone`)
+    .then((r) => r.data);
 
 // --- OOO Re-send suggestions ---
 export interface OooResendable {

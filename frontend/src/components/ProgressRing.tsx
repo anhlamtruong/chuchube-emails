@@ -28,7 +28,7 @@ export default function ProgressRing({
   const strokeColor =
     status === "completed"
       ? "stroke-green-500"
-      : status === "error"
+      : status === "error" || status === "stale"
         ? "stroke-destructive"
         : "stroke-primary";
 

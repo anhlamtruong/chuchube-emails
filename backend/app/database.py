@@ -5,8 +5,20 @@ from app.logging_config import get_logger
 
 _db_logger = get_logger("database")
 
-# connect_args is only needed for SQLite; detect driver from URL
-_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+# connect_args is only needed for SQLite; detect driver from URL.
+# For PostgreSQL (Supabase via PgBouncer) we enable TCP keepalives so the OS
+# detects dead connections before SQLAlchemy tries to use them.
+if DATABASE_URL.startswith("sqlite"):
+    _connect_args: dict = {"check_same_thread": False}
+else:
+    _connect_args = {
+        "connect_timeout": 10,        # fail fast on unreachable host
+        "keepalives": 1,              # enable TCP keepalives
+        "keepalives_idle": 30,        # first probe after 30 s idle
+        "keepalives_interval": 10,    # re-probe every 10 s
+        "keepalives_count": 5,        # give up after 5 failures (~80 s)
+    }
+
 engine = create_engine(
     DATABASE_URL,
     connect_args=_connect_args,

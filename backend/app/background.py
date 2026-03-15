@@ -9,7 +9,8 @@ import os
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import traceback
 
 from app.database import SessionLocal
 from app.models.email_column import EmailColumn
@@ -23,6 +24,7 @@ from app.services.vault import get_secret
 from app.services.audit_service import log_audit_bg
 from app import config
 from app.logging_config import get_logger
+from sqlalchemy.exc import OperationalError, DatabaseError
 
 logger = get_logger("background")
 
@@ -114,6 +116,47 @@ def unsubscribe_global(q: asyncio.Queue):
 
 
 # --------------------------------------------------------------------------- #
+# Resilient DB helper — survives PgBouncer / Supabase idle disconnects        #
+# --------------------------------------------------------------------------- #
+
+def _safe_db_update(updates_fn, description: str = "db update"):
+    """Open a short-lived session, apply *updates_fn(db)*, commit, close.
+
+    If the commit fails due to a connection error (OperationalError /
+    DatabaseError — e.g. SSL EOF from PgBouncer), the session is rolled back
+    and closed, a brand-new session is opened, and the update is retried once.
+    """
+    db = SessionLocal()
+    try:
+        updates_fn(db)
+        db.commit()
+    except (OperationalError, DatabaseError) as exc:
+        logger.warning(f"_safe_db_update({description}): connection error, retrying — {exc}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        db.close()
+        # Retry with a fresh session (pool_pre_ping validates the new conn)
+        db = SessionLocal()
+        try:
+            updates_fn(db)
+            db.commit()
+        except Exception as retry_exc:
+            logger.error(f"_safe_db_update({description}): retry also failed — {retry_exc}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            db.close()
+        return  # retry succeeded; skip the outer finally-close
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------- #
 # Email send logic (runs in a thread via BackgroundTasks)                      #
 # --------------------------------------------------------------------------- #
 
@@ -121,55 +164,117 @@ def unsubscribe_global(q: asyncio.Queue):
 def send_email_batch(job_result_id: str, row_ids: list[str]):
     """Send emails for the given campaign row IDs.
 
-    Creates / updates a JobResult row for persistent status tracking.
+    Uses short-lived DB sessions so the connection is never held idle during
+    SMTP sends or inter-email sleeps.  This prevents the
+    ``psycopg2.OperationalError: SSL SYSCALL error: EOF detected`` that occurs
+    when Supabase PgBouncer drops a connection that sits idle for >5 min.
+
+    The function is split into phases:
+      A) Mark job running               (own session)
+      B) Load all data into memory      (own session, then closed)
+      C) Send loop — per email          (fresh session per DB write)
+      D) Finalize job result            (own session)
+      E) Fatal error handler            (fresh session)
     """
+    # ── Phase A: Mark job running ─────────────────────────────────────────
+    try:
+        def _mark_running(db):
+            jr = db.query(JobResult).get(job_result_id)
+            if not jr:
+                raise ValueError("not_found")
+            jr.status = "running"
+
+        _safe_db_update(_mark_running, f"job {job_result_id} → running")
+    except ValueError:
+        logger.error(f"JobResult {job_result_id} not found — aborting")
+        return
+
+    # Publish job started (no DB needed)
+    _publish_event(job_result_id, "job_started", {
+        "job_id": job_result_id, "status": "running", "total": 0,
+        "sent": 0, "failed": 0,
+    })
+
+    # ── Phase B: Load all data into plain dicts (then release session) ────
     db = SessionLocal()
     try:
-        # Mark job running
+        rows_raw = db.query(EmailColumn).filter(EmailColumn.id.in_(row_ids)).all()
+        total = len(rows_raw)
+
+        # Update total
         jr = db.query(JobResult).get(job_result_id)
-        if not jr:
-            logger.error(f"JobResult {job_result_id} not found — aborting")
+        if jr:
+            jr.total = total
+            db.commit()
+
+        if not rows_raw:
+            logger.warning(f"Job {job_result_id}: no rows found for given IDs")
+            if jr:
+                jr.status = "completed"
+                jr.completed_at = datetime.now(tz=timezone.utc)
+                db.commit()
             return
-        jr.status = "running"
-        db.commit()
 
-        # Publish job started event
-        _publish_event(job_result_id, "job_started", {
-            "job_id": job_result_id, "status": "running", "total": jr.total,
-            "sent": 0, "failed": 0,
-        })
+        # Snapshot each row into a dict so we don't need the session later
+        rows_data: list[dict] = []
+        for r in sorted(rows_raw, key=lambda r: r.sender_email or ""):
+            rows_data.append({
+                "id": str(r.id),
+                "user_id": r.user_id or "",
+                "sender_email": r.sender_email,
+                "recipient_email": r.recipient_email,
+                "recipient_name": r.recipient_name,
+                "company": r.company,
+                "position": r.position,
+                "framework": r.framework,
+                "my_strength": r.my_strength,
+                "audience_value": r.audience_value,
+                "template_file": r.template_file,
+                "custom_fields": r.custom_fields or {},
+                "sent_status": r.sent_status,
+            })
 
-        rows = db.query(EmailColumn).filter(EmailColumn.id.in_(row_ids)).all()
-        jr.total = len(rows)
-        db.commit()
-
-        # Derive user_id from the first row to fetch per-user settings
-        _user_id = rows[0].user_id if rows else ""
+        _user_id = rows_data[0]["user_id"] if rows_data else ""
         personal = get_personal_info(db, _user_id)
         smtp_settings = get_smtp_settings(db, _user_id)
         smtp_server = smtp_settings["smtp_server"]
         smtp_port = int(smtp_settings["smtp_port"])
         sleep_seconds = float(smtp_settings["sleep_between_emails"])
 
-        current_sender = None
-        current_account = None  # SenderAccount object
-        server = None
-        sent = 0
-        failed = 0
-        errors: list[str] = []
-
-        rows_sorted = sorted(rows, key=lambda r: r.sender_email or "")
-
-        # --- Pre-load templates & documents to avoid N+1 queries per row ---
-        _template_names = {r.template_file for r in rows_sorted}
+        # Pre-load templates → dict[name, {subject_line, body_html}]
+        _template_names = {rd["template_file"] for rd in rows_data}
         _template_names |= {n.replace(".html", "") for n in _template_names}
         _all_templates = db.query(Template).filter(Template.name.in_(_template_names)).all()
-        _template_map: dict[str, Template] = {}
+        template_map: dict[str, dict] = {}
         for _t in _all_templates:
-            _template_map[_t.name] = _t
+            template_map[_t.name] = {"subject_line": _t.subject_line, "body_html": _t.body_html}
 
-        _all_row_ids = [str(r.id) for r in rows_sorted]
-        _all_senders = list({r.sender_email for r in rows_sorted if r.sender_email})
+        # Pre-load sender accounts → dict[email, {provider, display_name, smtp_host, smtp_port, vault_secret_name}]
+        _all_senders = list({rd["sender_email"] for rd in rows_data if rd["sender_email"]})
+        _sender_accounts_raw = (
+            db.query(SenderAccount)
+            .filter(SenderAccount.email.in_(_all_senders), SenderAccount.user_id == _user_id)
+            .all()
+        ) if _all_senders else []
+        sender_account_map: dict[str, dict] = {}
+        for sa in _sender_accounts_raw:
+            sender_account_map[sa.email] = {
+                "provider": sa.provider,
+                "display_name": sa.display_name,
+                "smtp_host": sa.smtp_host,
+                "smtp_port": sa.smtp_port,
+                "vault_secret_name": sa.vault_secret_name,
+            }
+
+        # Pre-load credentials (from vault)
+        credential_map: dict[str, str] = {}
+        for email, acct in sender_account_map.items():
+            cred = get_secret(db, acct["vault_secret_name"])
+            if cred:
+                credential_map[email] = cred
+
+        # Pre-load documents → attachment bytes
+        _all_row_ids = [rd["id"] for rd in rows_data]
         _global_docs = db.query(Document).filter(
             Document.scope == "global", Document.user_id == _user_id
         ).all()
@@ -179,272 +284,313 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
         _row_docs_all = db.query(Document).filter(
             Document.scope == "campaign_row", Document.scope_ref.in_(_all_row_ids)
         ).all() if _all_row_ids else []
-        # Index sender docs and row docs for O(1) lookup
+        # Snapshot doc metadata (download happens per-row to avoid huge memory)
         _sender_doc_map: dict[str, list] = {}
         for _d in _sender_docs_all:
-            _sender_doc_map.setdefault(_d.scope_ref, []).append(_d)
+            _sender_doc_map.setdefault(_d.scope_ref, []).append(
+                {"file_path": _d.file_path, "original_name": _d.original_name, "mime_type": _d.mime_type}
+            )
         _row_doc_map: dict[str, list] = {}
         for _d in _row_docs_all:
-            _row_doc_map.setdefault(_d.scope_ref, []).append(_d)
-        # --- End pre-load ---
-
-        for row in rows_sorted:
-            if row.sent_status in ("sent", "response"):
-                continue
-
-            required_sender = row.sender_email
-            if not required_sender:
-                failed += 1
-                errors.append(f"Row {row.id}: no sender email")
-                continue
-
-            # Switch connection when sender changes
-            if required_sender != current_sender:
-                if server:
-                    try:
-                        server.quit()
-                    except Exception:
-                        pass
-                    server = None
-
-                # Look up sender account from DB
-                account = db.query(SenderAccount).filter(
-                    SenderAccount.email == required_sender,
-                    SenderAccount.user_id == row.user_id,
-                ).first()
-                if not account:
-                    failed += 1
-                    errors.append(f"Row {row.id}: no sender account for {required_sender}")
-                    current_sender = None
-                    current_account = None
-                    continue
-
-                # Retrieve credential from Vault
-                credential = get_secret(db, account.vault_secret_name)
-                if not credential:
-                    failed += 1
-                    errors.append(f"Row {row.id}: no credential in Vault for {required_sender}")
-                    current_sender = None
-                    current_account = None
-                    continue
-
-                # Audit: credential accessed for email sending
-                log_audit_bg(
-                    user_id=row.user_id or "",
-                    event_type="credential.accessed",
-                    resource_type="vault_secret",
-                    resource_id=account.vault_secret_name,
-                    detail={"purpose": "email_send", "job_id": job_result_id},
-                )
-
-                current_account = account
-
-                if account.provider == "smtp":
-                    smtp_host = account.smtp_host or smtp_server
-                    smtp_port_val = account.smtp_port or smtp_port
-                    try:
-                        server = email_sender.login_to_server(
-                            smtp_host, smtp_port_val, required_sender, credential
-                        )
-                        current_sender = required_sender
-                    except Exception as e:
-                        failed += 1
-                        errors.append(f"Row {row.id}: SMTP login failed: {e}")
-                        server = None
-                        current_sender = None
-                        current_account = None
-                        continue
-                elif account.provider == "resend":
-                    # Resend doesn't maintain a persistent connection; just store the key
-                    current_sender = required_sender
-                    server = None  # no SMTP server for resend
-                else:
-                    failed += 1
-                    errors.append(f"Row {row.id}: unknown provider {account.provider}")
-                    current_sender = None
-                    current_account = None
-                    continue
-
-            if current_account is None:
-                failed += 1
-                continue
-            if current_account.provider == "smtp" and server is None:
-                failed += 1
-                continue
-
-            # Load template from pre-loaded map
-            tpl_key = row.template_file.replace(".html", "")
-            tpl = _template_map.get(tpl_key) or _template_map.get(row.template_file)
-            if not tpl:
-                failed += 1
-                errors.append(f"Row {row.id}: template '{row.template_file}' not found")
-                continue
-
-            # Gather attachments from pre-loaded Document maps
-            from app.services.storage import download_file as sb_download
-            files_to_send: list[tuple] = []  # (bytes, original_name, mime_type)
-            sender_docs = _sender_doc_map.get(current_sender, [])
-            row_docs = _row_doc_map.get(str(row.id), [])
-            all_docs = sender_docs + _global_docs + row_docs
-            for doc in all_docs:
-                try:
-                    data = sb_download(doc.file_path)
-                    files_to_send.append((data, doc.original_name, doc.mime_type))
-                except Exception as e:
-                    logger.warning(f"Could not download attachment {doc.file_path}: {e}")
-
-            # Personalize template
-            try:
-                subject, body, image_to_embed = template_handler.personalize_template(
-                    tpl.subject_line,
-                    tpl.body_html,
-                    recipient_name=row.recipient_name,
-                    company=row.company,
-                    position=row.position,
-                    framework=row.framework,
-                    my_strength=row.my_strength,
-                    audience_value=row.audience_value,
-                    your_name=personal["your_name"],
-                    your_phone_number=personal["your_phone"],
-                    your_email=current_sender,
-                    your_city_and_state=personal["your_city_state"],
-                    image_assets_folder=str(config.SELFIE_DIR),
-                    template_file_name=row.template_file,
-                    **(row.custom_fields or {}),
-                )
-            except Exception as e:
-                failed += 1
-                errors.append(f"Row {row.id}: template error: {e}")
-                continue
-
-            # Send
-            try:
-                if current_account.provider == "smtp":
-                    email_sender.send_email(
-                        server,
-                        current_sender,
-                        row.recipient_email,
-                        subject,
-                        body,
-                        attachment_paths=files_to_send,
-                        inline_image_path=image_to_embed,
-                    )
-                elif current_account.provider == "resend":
-                    resend_key = get_secret(db, current_account.vault_secret_name)
-                    email_sender.send_email_resend(
-                        api_key=resend_key,
-                        from_email=current_sender,
-                        from_name=current_account.display_name,
-                        to_email=row.recipient_email,
-                        subject=subject,
-                        html_body=body,
-                        attachments=files_to_send,
-                    )
-                row.sent_status = "sent"
-                row.sent_at = datetime.now(tz=timezone.utc)
-                sent += 1
-                jr.sent = sent
-                db.commit()
-                logger.info(f"Job {job_result_id}: sent to {row.recipient_email} (row {row.id})")
-
-                # Publish per-email and job-level events
-                _publish_event(job_result_id, "email_update", {
-                    "job_id": job_result_id, "row_id": str(row.id),
-                    "recipient_email": row.recipient_email,
-                    "recipient_name": row.recipient_name or "",
-                    "company": row.company or "",
-                    "sent_status": "sent",
-                    "sent_at": row.sent_at.isoformat() + "Z" if row.sent_at else None,
-                })
-                _publish_event(job_result_id, "job_update", {
-                    "job_id": job_result_id, "status": "running",
-                    "sent": sent, "failed": failed, "total": jr.total,
-                })
-
-                # Audit: email sent
-                log_audit_bg(
-                    user_id=row.user_id or "",
-                    event_type="email.sent",
-                    resource_type="email_column",
-                    resource_id=str(row.id),
-                    detail={"recipient": row.recipient_email, "job_id": job_result_id},
-                )
-
-                time.sleep(sleep_seconds)
-            except Exception as e:
-                row.sent_status = "failed"
-                failed += 1
-                jr.failed = failed
-                jr.errors = errors + [f"Row {row.id}: send failed: {e}"]
-                db.commit()
-                errors.append(f"Row {row.id}: send failed: {e}")
-                logger.error(f"Job {job_result_id}: failed row {row.id}: {e}")
-
-                # Publish per-email and job-level events
-                _publish_event(job_result_id, "email_update", {
-                    "job_id": job_result_id, "row_id": str(row.id),
-                    "recipient_email": row.recipient_email,
-                    "recipient_name": row.recipient_name or "",
-                    "company": row.company or "",
-                    "sent_status": "failed",
-                    "sent_at": None,
-                })
-                _publish_event(job_result_id, "job_update", {
-                    "job_id": job_result_id, "status": "running",
-                    "sent": sent, "failed": failed, "total": jr.total,
-                })
-
-                # Audit: email failed
-                log_audit_bg(
-                    user_id=row.user_id or "",
-                    event_type="email.failed",
-                    resource_type="email_column",
-                    resource_id=str(row.id),
-                    detail={"recipient": row.recipient_email, "job_id": job_result_id, "error": str(e)},
-                )
-
-        if server:
-            try:
-                server.quit()
-            except Exception:
-                pass
-
-        # Finalize job result
-        jr.sent = sent
-        jr.failed = failed
-        jr.errors = errors
-        jr.status = "completed"
-        jr.completed_at = datetime.now(tz=timezone.utc)
-        db.commit()
-        logger.info(f"Job {job_result_id}: completed — sent={sent}, failed={failed}")
-
-        # Publish completion event
-        _publish_event(job_result_id, "job_finished", {
-            "job_id": job_result_id, "status": "completed",
-            "sent": sent, "failed": failed, "total": jr.total,
-            "completed_at": jr.completed_at.isoformat() + "Z",
-        })
-
+            _row_doc_map.setdefault(_d.scope_ref, []).append(
+                {"file_path": _d.file_path, "original_name": _d.original_name, "mime_type": _d.mime_type}
+            )
+        _global_doc_list = [
+            {"file_path": _d.file_path, "original_name": _d.original_name, "mime_type": _d.mime_type}
+            for _d in _global_docs
+        ]
     except Exception as e:
-        # Fatal error — update job result if possible
-        try:
-            jr = db.query(JobResult).get(job_result_id)
-            if jr:
-                jr.status = "error"
-                jr.errors = (jr.errors or []) + [str(e)]
-                jr.completed_at = datetime.now(tz=timezone.utc)
-                db.commit()
-                _publish_event(job_result_id, "job_finished", {
-                    "job_id": job_result_id, "status": "error",
-                    "sent": jr.sent, "failed": jr.failed, "total": jr.total,
-                    "completed_at": jr.completed_at.isoformat() + "Z",
-                })
-        except Exception:
-            pass
-        logger.error(f"Job {job_result_id}: fatal error: {e}")
+        logger.error(f"Job {job_result_id}: failed to load data — {e}")
+        _safe_db_update(
+            lambda db: _set_job_error(db, job_result_id, str(e)),
+            f"job {job_result_id} → error (load phase)",
+        )
         raise
     finally:
-        db.close()
+        db.close()  # Session released — all data is in plain dicts now
+
+    # ── Phase C: Send loop — no long-lived DB session ─────────────────────
+    current_sender = None
+    server = None
+    sent = 0
+    failed = 0
+    errors: list[str] = []
+
+    for rd in rows_data:
+        if rd["sent_status"] in ("sent", "response"):
+            continue
+
+        required_sender = rd["sender_email"]
+        if not required_sender:
+            failed += 1
+            errors.append(f"Row {rd['id']}: no sender email")
+            continue
+
+        # Switch SMTP connection when sender changes
+        if required_sender != current_sender:
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
+                server = None
+
+            acct = sender_account_map.get(required_sender)
+            if not acct:
+                failed += 1
+                errors.append(f"Row {rd['id']}: no sender account for {required_sender}")
+                current_sender = None
+                continue
+
+            cred = credential_map.get(required_sender)
+            if not cred:
+                failed += 1
+                errors.append(f"Row {rd['id']}: no credential for {required_sender}")
+                current_sender = None
+                continue
+
+            # Audit: credential accessed
+            log_audit_bg(
+                user_id=rd["user_id"],
+                event_type="credential.accessed",
+                resource_type="vault_secret",
+                resource_id=acct["vault_secret_name"],
+                detail={"purpose": "email_send", "job_id": job_result_id},
+            )
+
+            if acct["provider"] == "smtp":
+                smtp_host = acct["smtp_host"] or smtp_server
+                smtp_port_val = acct["smtp_port"] or smtp_port
+                try:
+                    server = email_sender.login_to_server(smtp_host, smtp_port_val, required_sender, cred)
+                    current_sender = required_sender
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"Row {rd['id']}: SMTP login failed: {e}")
+                    server = None
+                    current_sender = None
+                    continue
+            elif acct["provider"] == "resend":
+                current_sender = required_sender
+                server = None
+            else:
+                failed += 1
+                errors.append(f"Row {rd['id']}: unknown provider {acct['provider']}")
+                current_sender = None
+                continue
+
+        acct = sender_account_map.get(current_sender or "")
+        if acct is None:
+            failed += 1
+            continue
+        if acct["provider"] == "smtp" and server is None:
+            failed += 1
+            continue
+
+        # Load template from pre-loaded map
+        tpl_key = rd["template_file"].replace(".html", "")
+        tpl = template_map.get(tpl_key) or template_map.get(rd["template_file"])
+        if not tpl:
+            failed += 1
+            errors.append(f"Row {rd['id']}: template '{rd['template_file']}' not found")
+            continue
+
+        # Gather attachments (download here so memory is released each iteration)
+        from app.services.storage import download_file as sb_download
+        files_to_send: list[tuple] = []
+        sender_docs = _sender_doc_map.get(current_sender or "", [])
+        row_docs = _row_doc_map.get(rd["id"], [])
+        all_docs = sender_docs + _global_doc_list + row_docs
+        for doc in all_docs:
+            try:
+                data = sb_download(doc["file_path"])
+                files_to_send.append((data, doc["original_name"], doc["mime_type"]))
+            except Exception as e:
+                logger.warning(f"Could not download attachment {doc['file_path']}: {e}")
+
+        # Personalize template
+        try:
+            subject, body, image_to_embed = template_handler.personalize_template(
+                tpl["subject_line"],
+                tpl["body_html"],
+                recipient_name=rd["recipient_name"],
+                company=rd["company"],
+                position=rd["position"],
+                framework=rd["framework"],
+                my_strength=rd["my_strength"],
+                audience_value=rd["audience_value"],
+                your_name=personal["your_name"],
+                your_phone_number=personal["your_phone"],
+                your_email=current_sender,
+                your_city_and_state=personal["your_city_state"],
+                image_assets_folder=str(config.SELFIE_DIR),
+                template_file_name=rd["template_file"],
+                **rd["custom_fields"],
+            )
+        except Exception as e:
+            failed += 1
+            errors.append(f"Row {rd['id']}: template error: {e}")
+            continue
+
+        # ── SMTP send (no DB held) ──
+        row_id = rd["id"]
+        try:
+            if acct["provider"] == "smtp":
+                email_sender.send_email(
+                    server,
+                    current_sender,
+                    rd["recipient_email"],
+                    subject,
+                    body,
+                    attachment_paths=files_to_send,
+                    inline_image_path=image_to_embed,
+                )
+            elif acct["provider"] == "resend":
+                resend_key = credential_map.get(current_sender or "", "")
+                email_sender.send_email_resend(
+                    api_key=resend_key,
+                    from_email=current_sender,
+                    from_name=acct["display_name"],
+                    to_email=rd["recipient_email"],
+                    subject=subject,
+                    html_body=body,
+                    attachments=files_to_send,
+                )
+
+            # ── DB write: mark sent (short-lived session) ──
+            sent += 1
+            _sent = sent
+            _failed = failed
+            _total = total
+
+            def _mark_sent(db, _row_id=row_id, _s=_sent, _f=_failed, _t=_total):
+                row = db.query(EmailColumn).get(_row_id)
+                if row:
+                    row.sent_status = "sent"
+                    row.sent_at = datetime.now(tz=timezone.utc)
+                jr = db.query(JobResult).get(job_result_id)
+                if jr:
+                    jr.sent = _s
+
+            _safe_db_update(_mark_sent, f"row {row_id} → sent")
+            logger.info(f"Job {job_result_id}: sent to {rd['recipient_email']} (row {row_id})")
+
+            _publish_event(job_result_id, "email_update", {
+                "job_id": job_result_id, "row_id": row_id,
+                "recipient_email": rd["recipient_email"],
+                "recipient_name": rd["recipient_name"] or "",
+                "company": rd["company"] or "",
+                "sent_status": "sent",
+                "sent_at": datetime.now(tz=timezone.utc).isoformat() + "Z",
+            })
+            _publish_event(job_result_id, "job_update", {
+                "job_id": job_result_id, "status": "running",
+                "sent": sent, "failed": failed, "total": total,
+            })
+
+            log_audit_bg(
+                user_id=rd["user_id"],
+                event_type="email.sent",
+                resource_type="email_column",
+                resource_id=row_id,
+                detail={"recipient": rd["recipient_email"], "job_id": job_result_id},
+            )
+
+            time.sleep(sleep_seconds)
+
+        except Exception as e:
+            # ── DB write: mark failed (short-lived session) ──
+            failed += 1
+            errors.append(f"Row {row_id}: send failed: {e}")
+            _failed = failed
+            _errors_snapshot = list(errors)
+
+            def _mark_failed(db, _row_id=row_id, _f=_failed, _errs=_errors_snapshot):
+                row = db.query(EmailColumn).get(_row_id)
+                if row:
+                    row.sent_status = "failed"
+                jr = db.query(JobResult).get(job_result_id)
+                if jr:
+                    jr.failed = _f
+                    jr.errors = _errs
+
+            _safe_db_update(_mark_failed, f"row {row_id} → failed")
+            logger.error(f"Job {job_result_id}: failed row {row_id}: {e}")
+
+            _publish_event(job_result_id, "email_update", {
+                "job_id": job_result_id, "row_id": row_id,
+                "recipient_email": rd["recipient_email"],
+                "recipient_name": rd["recipient_name"] or "",
+                "company": rd["company"] or "",
+                "sent_status": "failed",
+                "sent_at": None,
+            })
+            _publish_event(job_result_id, "job_update", {
+                "job_id": job_result_id, "status": "running",
+                "sent": sent, "failed": failed, "total": total,
+            })
+
+            log_audit_bg(
+                user_id=rd["user_id"],
+                event_type="email.failed",
+                resource_type="email_column",
+                resource_id=row_id,
+                detail={"recipient": rd["recipient_email"], "job_id": job_result_id, "error": str(e)},
+            )
+
+    # Close SMTP connection
+    if server:
+        try:
+            server.quit()
+        except Exception:
+            pass
+
+    # ── Phase D: Finalize job result ──────────────────────────────────────
+    _final_sent = sent
+    _final_failed = failed
+    _final_errors = list(errors)
+
+    try:
+        def _finalize(db):
+            jr = db.query(JobResult).get(job_result_id)
+            if jr:
+                jr.sent = _final_sent
+                jr.failed = _final_failed
+                jr.errors = _final_errors
+                jr.status = "completed"
+                jr.completed_at = datetime.now(tz=timezone.utc)
+
+        _safe_db_update(_finalize, f"job {job_result_id} → completed")
+        logger.info(f"Job {job_result_id}: completed — sent={sent}, failed={failed}")
+
+        _publish_event(job_result_id, "job_finished", {
+            "job_id": job_result_id, "status": "completed",
+            "sent": sent, "failed": failed, "total": total,
+            "completed_at": datetime.now(tz=timezone.utc).isoformat() + "Z",
+        })
+    except Exception as e:
+        logger.error(f"Job {job_result_id}: failed to finalize — {e}\n{traceback.format_exc()}")
+        try:
+            _safe_db_update(
+                lambda db, _e=str(e): _set_job_error(db, job_result_id, f"Finalize error: {_e}"),
+                f"job {job_result_id} → error (finalize failed)",
+            )
+        except Exception:
+            logger.error(f"Job {job_result_id}: could not mark as error after finalize crash")
+
+
+def _set_job_error(db, job_result_id: str, error_msg: str):
+    """Helper used by _safe_db_update to mark a job as errored."""
+    jr = db.query(JobResult).get(job_result_id)
+    if jr:
+        jr.status = "error"
+        jr.errors = (jr.errors or []) + [error_msg]
+        jr.completed_at = datetime.now(tz=timezone.utc)
+        _publish_event(job_result_id, "job_finished", {
+            "job_id": job_result_id, "status": "error",
+            "sent": jr.sent, "failed": jr.failed, "total": jr.total,
+            "completed_at": jr.completed_at.isoformat() + "Z",
+        })
 
 
 # --------------------------------------------------------------------------- #
@@ -456,18 +602,30 @@ _bounce_task: asyncio.Task | None = None
 _ooo_expire_task: asyncio.Task | None = None
 
 
+_scheduler_consecutive_errors = 0
+
+
 async def _scheduler_loop():
     """Async loop: every 60 s, find rows with scheduled_at <= now and send."""
+    global _scheduler_consecutive_errors
     logger.info("Scheduler loop started (60 s interval)")
     while True:
         try:
             await asyncio.sleep(60)
             _check_due_rows()
+            _scheduler_consecutive_errors = 0
         except asyncio.CancelledError:
             logger.info("Scheduler loop cancelled")
             break
         except Exception as e:
-            logger.error(f"Scheduler loop error: {e}")
+            _scheduler_consecutive_errors += 1
+            if _scheduler_consecutive_errors > 5:
+                logger.critical(
+                    f"Scheduler loop: {_scheduler_consecutive_errors} consecutive errors! "
+                    f"Latest: {e}\n{traceback.format_exc()}"
+                )
+            else:
+                logger.error(f"Scheduler loop error: {e}\n{traceback.format_exc()}")
 
 
 async def _bounce_check_loop():
@@ -631,8 +789,6 @@ def _check_due_rows():
             .with_for_update(skip_locked=True)
             .all()
         )
-        if not scheduled_jobs:
-            return
 
         for jr in scheduled_jobs:
             # Skip if this job is already running
@@ -669,14 +825,123 @@ def _check_due_rows():
             with _running_jobs_lock:
                 _running_jobs.add(jr.id)
             _executor.submit(_run_job_then_cleanup, jr.id, row_ids)
+
+        # --- Stale-job detection ---
+        # Mark jobs that have been "scheduled" for >15 min past their
+        # scheduled_at but whose email rows are no longer dispatchable.
+        _STALE_THRESHOLD = timedelta(minutes=15)
+        stale_cutoff = now - _STALE_THRESHOLD
+
+        stale_candidates = (
+            db.query(JobResult)
+            .filter(
+                JobResult.status == "scheduled",
+                JobResult.scheduled_at != None,  # noqa: E711
+                JobResult.scheduled_at <= stale_cutoff,
+            )
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+
+        for jr in stale_candidates:
+            with _running_jobs_lock:
+                if jr.id in _running_jobs:
+                    continue
+
+            # Check if there are any dispatchable rows left
+            dispatchable = 0
+            if jr.row_ids:
+                dispatchable = (
+                    db.query(EmailColumn)
+                    .filter(
+                        EmailColumn.id.in_(jr.row_ids),
+                        EmailColumn.scheduled_at != None,  # noqa: E711
+                        EmailColumn.sent_status == "pending",
+                    )
+                    .count()
+                )
+
+            if dispatchable == 0:
+                # Rows are not dispatchable — mark job as stale
+                reason = (
+                    f"Scheduled time {jr.scheduled_at.isoformat()}Z passed "
+                    f"{(_STALE_THRESHOLD.total_seconds() / 60):.0f}+ min ago "
+                    f"but email rows are no longer dispatchable "
+                    f"(scheduled_at cleared or sent_status changed)."
+                )
+                jr.status = "stale"
+                jr.errors = (jr.errors or []) + [reason]
+                jr.completed_at = datetime.now(tz=timezone.utc)
+                db.commit()
+                logger.warning(f"Stale job detected: {jr.id} — {reason}")
+                _publish_event(jr.id, "job_finished", {
+                    "job_id": jr.id, "status": "stale",
+                    "sent": jr.sent, "failed": jr.failed, "total": jr.total,
+                    "completed_at": jr.completed_at.isoformat() + "Z",
+                })
+
+        # --- Stuck-running detection ---
+        # Mark "running" jobs that are NOT in the _running_jobs in-memory set
+        # and were created >2 hours ago.  This catches jobs that crashed without
+        # being marked as error (e.g. process restart, OOM kill).
+        _STUCK_THRESHOLD = timedelta(hours=2)
+        stuck_cutoff = now - _STUCK_THRESHOLD
+
+        stuck_candidates = (
+            db.query(JobResult)
+            .filter(
+                JobResult.status == "running",
+                JobResult.created_at != None,  # noqa: E711
+                JobResult.created_at <= stuck_cutoff,
+            )
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+
+        for jr in stuck_candidates:
+            with _running_jobs_lock:
+                if jr.id in _running_jobs:
+                    continue  # genuinely still running in this process
+
+            reason = (
+                f"Job has been in 'running' status since "
+                f"{jr.created_at.isoformat()}Z (>{_STUCK_THRESHOLD.total_seconds() / 3600:.0f}h) "
+                f"but is not tracked in the current process. "
+                f"Likely crashed or process was restarted."
+            )
+            jr.status = "error"
+            jr.errors = (jr.errors or []) + [reason]
+            jr.completed_at = datetime.now(tz=timezone.utc)
+            db.commit()
+            logger.warning(f"Stuck running job detected: {jr.id} — {reason}")
+            _publish_event(jr.id, "job_finished", {
+                "job_id": jr.id, "status": "error",
+                "sent": jr.sent, "failed": jr.failed, "total": jr.total,
+                "completed_at": jr.completed_at.isoformat() + "Z",
+            })
     finally:
         db.close()
 
 
 def _run_job_then_cleanup(job_id: str, row_ids: list[str]):
-    """Run send_email_batch and remove from _running_jobs on completion."""
+    """Run send_email_batch and remove from _running_jobs on completion.
+
+    Catches any unhandled exception that escapes send_email_batch and
+    force-marks the job as error so it never stays stuck in 'running'.
+    """
     try:
         send_email_batch(job_id, row_ids)
+    except Exception as exc:
+        logger.critical(
+            f"Job {job_id}: unhandled crash in send_email_batch — {exc}\n{traceback.format_exc()}"
+        )
+        try:
+            _safe_db_update(
+                lambda db, _jid=job_id, _e=str(exc): _set_job_error(db, _jid, f"Unhandled error: {_e}"),
+                f"job {job_id} → error (unhandled crash)",
+            )
+        except Exception:
+            logger.error(f"Job {job_id}: could not mark as error after crash")
     finally:
         with _running_jobs_lock:
             _running_jobs.discard(job_id)
@@ -694,7 +959,12 @@ def start_scheduler(app=None):
 
 
 def stop_scheduler():
-    """Cancel the scheduler, bounce, and OOO expire loops. Call during FastAPI lifespan shutdown."""
+    """Cancel the scheduler, bounce, and OOO expire loops.
+
+    Also shuts down the thread-pool executor, waiting for in-flight email
+    batches to finish (up to the Docker stop_grace_period).
+    Call during FastAPI lifespan shutdown.
+    """
     global _scheduler_task, _bounce_task, _ooo_expire_task
     if _scheduler_task and not _scheduler_task.done():
         _scheduler_task.cancel()
@@ -702,4 +972,8 @@ def stop_scheduler():
         _bounce_task.cancel()
     if _ooo_expire_task and not _ooo_expire_task.done():
         _ooo_expire_task.cancel()
+
+    # Let running email-send threads finish; don't start new ones.
+    logger.info("Shutting down email-send thread pool (waiting for in-flight jobs)…")
+    _executor.shutdown(wait=True, cancel_futures=False)
     logger.info("Background scheduler + bounce checker + OOO expirer stopped")

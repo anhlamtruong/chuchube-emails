@@ -129,3 +129,6 @@ export const getAdminJobs = (filters?: AdminJobFilters) =>
 
 export const adminCancelJob = (jobId: string) =>
   api.delete(`/admin/jobs/${jobId}`).then((r) => r.data);
+
+export const adminForceErrorJob = (jobId: string) =>
+  api.post(`/admin/jobs/${jobId}/force-error`).then((r) => r.data);

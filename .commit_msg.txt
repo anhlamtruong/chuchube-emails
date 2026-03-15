@@ -1,0 +1,37 @@
+feat: harden email engine, add stuck-job recovery, admin force-error, OOO re-send scheduling
+
+Backend hardening:
+- Rewrite send_email_batch() to use short-lived DB sessions (_safe_db_update)
+  preventing SSL SYSCALL EOF errors from PgBouncer idle timeouts
+- Phase D finalize now marks job as error on failure (was only logging)
+- _run_job_then_cleanup catches unhandled exceptions, force-marks job as error
+- Add stuck-running detection: jobs running >2h not in _running_jobs set -> error
+- Add stale-job detection: scheduled jobs >15min past due with no dispatchable rows
+- Remove early-return bug in _check_due_rows that skipped stale/stuck detection
+- Add TCP keepalives to PostgreSQL connections (database.py)
+- Graceful shutdown: executor.shutdown(wait=True) in stop_scheduler()
+- Engine.dispose() on FastAPI lifespan shutdown
+- Pin all requirements.txt versions
+- docker-compose: stop_grace_period 60s
+- redeploy.sh: graceful backend drain before rebuild
+
+Admin force-error:
+- POST /api/admin/jobs/{id}/force-error endpoint (master_admin only)
+- Frontend: adminForceErrorJob() API + AlertTriangle button on running jobs
+
+Job management (rerun/reschedule/clone):
+- POST /api/emails/jobs/{id}/rerun - retry failed/pending rows immediately
+- POST /api/emails/jobs/{id}/reschedule - schedule retry at new time
+- POST /api/emails/jobs/{id}/clone - duplicate all rows as fresh pending + send
+- parent_job_id column + migration (026) for audit trail
+- Frontend: Rerun/Clone/Reschedule buttons on JobDetailPage + ScheduledJobsPage
+
+OOO re-send scheduling (SendPage):
+- Checkbox selection on OOO table (per-row + select all)
+- Schedule Re-send button: groups by ooo_return_date, schedules at 9 AM local
+- Past/today dates -> tomorrow, unknown dates -> tomorrow
+
+UI polish:
+- stale status support across StatusDot, ProgressRing, badges, SSE streams
+- Stale job warning banner on Dashboard + ScheduledJobsPage
+- Dashboard: running jobs now shown in upcoming section

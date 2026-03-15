@@ -19,6 +19,7 @@ import {
   Upload,
   Calendar,
   ArrowUpRight,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +36,7 @@ interface DashboardData {
   total_campaigns: number;
   by_status: Record<string, number>;
   upcoming_jobs?: UpcomingJob[];
+  stale_job_count?: number;
 }
 
 export default function DashboardPage() {
@@ -51,6 +53,16 @@ export default function DashboardPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Notify about stale jobs once when data loads
+  useEffect(() => {
+    if (data && (data.stale_job_count ?? 0) > 0) {
+      toast.warning(
+        `${data.stale_job_count} stale job${data.stale_job_count! > 1 ? "s" : ""} need attention`,
+        { id: "stale-jobs", duration: 8000 },
+      );
+    }
+  }, [data?.stale_job_count]);
 
   // SSE: live job updates on dashboard
   const hasActive = (data?.upcoming_jobs ?? []).some((j) =>
@@ -161,6 +173,28 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {/* Stale Jobs Alert */}
+      {(data.stale_job_count ?? 0) > 0 && (
+        <div
+          className="flex items-center justify-between rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/30 px-4 py-3 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50 transition-colors"
+          onClick={() => navigate("/scheduled-jobs")}
+        >
+          <div className="flex items-center gap-3">
+            <AlertTriangle size={18} className="text-orange-600 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                {data.stale_job_count} stale job
+                {data.stale_job_count! > 1 ? "s" : ""} need attention
+              </p>
+              <p className="text-xs text-orange-600 dark:text-orange-400">
+                These scheduled jobs never executed. Click to review and rerun.
+              </p>
+            </div>
+          </div>
+          <ArrowUpRight size={16} className="text-orange-600 shrink-0" />
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

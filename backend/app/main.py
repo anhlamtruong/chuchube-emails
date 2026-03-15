@@ -96,6 +96,10 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     stop_scheduler()
+    # Dispose all pooled DB connections so the process exits cleanly
+    from app.database import engine
+    engine.dispose()
+    logger.info("DB engine disposed")
 
 
 app = FastAPI(
@@ -289,15 +293,22 @@ def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
     from app.models.job_result import JobResult
     upcoming = (
         db.query(JobResult)
-        .filter(JobResult.user_id == uid, JobResult.status.in_(["queued", "scheduled"]))
+        .filter(JobResult.user_id == uid, JobResult.status.in_(["queued", "scheduled", "running"]))
         .order_by(JobResult.created_at.desc())
         .limit(5)
         .all()
+    )
+    # Stale jobs that need attention
+    stale_count = (
+        db.query(JobResult)
+        .filter(JobResult.user_id == uid, JobResult.status == "stale")
+        .count()
     )
     return {
         "total_recruiters": total_recruiters,
         "total_campaigns": total_campaigns,
         "by_status": {s: c for s, c in statuses},
+        "stale_job_count": stale_count,
         "upcoming_jobs": [
             {
                 "job_id": jr.id,

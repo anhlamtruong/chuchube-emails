@@ -444,3 +444,32 @@ def admin_cancel_job(
     admin_uid = get_user_id(auth)
     logger.info(f"Admin {admin_uid} cancelled job {job_id} (owner: {jr.user_id})")
     return {"job_id": jr.id, "status": "cancelled"}
+
+
+@router.post("/jobs/{job_id}/force-error")
+def admin_force_error_job(
+    job_id: str,
+    auth: dict = Depends(require_master_admin),
+    db: Session = Depends(get_db),
+):
+    """Force a stuck running/queued job into error status. Master admin only."""
+    jr = db.query(JobResult).get(job_id)
+    if not jr:
+        raise HTTPException(404, "Job not found")
+    if jr.status not in ("running", "queued"):
+        raise HTTPException(
+            400,
+            f"Job is '{jr.status}' — only running/queued jobs can be force-errored",
+        )
+
+    from datetime import timezone
+    jr.status = "error"
+    jr.errors = (jr.errors or []) + [
+        f"Force-errored by admin at {datetime.now(tz=timezone.utc).isoformat()}Z"
+    ]
+    jr.completed_at = datetime.now(tz=timezone.utc)
+    db.commit()
+
+    admin_uid = get_user_id(auth)
+    logger.info(f"Admin {admin_uid} force-errored job {job_id} (owner: {jr.user_id})")
+    return {"job_id": jr.id, "status": "error"}

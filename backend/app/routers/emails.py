@@ -226,7 +226,7 @@ def get_scheduled_jobs(auth: dict = Depends(require_auth), db: Session = Depends
     )
     done = (
         db.query(JobResult)
-        .filter(JobResult.user_id == uid, JobResult.status.in_(["completed", "error", "cancelled"]))
+        .filter(JobResult.user_id == uid, JobResult.status.in_(["completed", "error", "cancelled", "stale"]))
         .order_by(JobResult.completed_at.desc())
         .limit(20)
         .all()
@@ -280,6 +280,264 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
     jr.status = "cancelled"
     db.commit()
     return {"job_id": jr.id, "status": "cancelled"}
+
+
+# --------------------------------------------------------------------------- #
+# Rerun / Reschedule endpoints                                                 #
+# --------------------------------------------------------------------------- #
+
+class RescheduleJobRequest(BaseModel):
+    run_at: datetime
+    timezone: str = "UTC"
+
+
+@router.post("/jobs/{job_id}/rerun")
+@limiter.limit("30/minute")
+def rerun_job(
+    job_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Rerun a failed/stale/error job by creating a new job with unsent rows.
+
+    Only rows that are 'pending' or 'failed' are included in the new job.
+    Already-sent rows are skipped. The new job dispatches immediately.
+    """
+    from app.background import send_email_batch
+    uid = get_user_id(auth)
+    _upsert_user_profile(auth, db)
+
+    jr = db.query(JobResult).get(job_id)
+    if not jr or jr.user_id != uid:
+        raise HTTPException(404, "Job not found")
+    if jr.status not in ("error", "stale", "completed", "cancelled"):
+        raise HTTPException(
+            400,
+            f"Cannot rerun job in '{jr.status}' status. "
+            f"Only error, stale, completed, or cancelled jobs can be rerun.",
+        )
+
+    if not jr.row_ids:
+        raise HTTPException(400, "Job has no row_ids to rerun")
+
+    # Get rows that can be retried (pending or failed)
+    retryable_rows = (
+        db.query(EmailColumn)
+        .filter(
+            EmailColumn.id.in_([str(rid) for rid in jr.row_ids]),
+            EmailColumn.sent_status.in_(["pending", "failed"]),
+            EmailColumn.user_id == uid,
+        )
+        .all()
+    )
+    if not retryable_rows:
+        raise HTTPException(400, "No retryable rows found (all already sent)")
+
+    # Reset rows to pending
+    for row in retryable_rows:
+        row.sent_status = "pending"
+        row.sent_at = None
+        row.scheduled_at = None
+
+    row_ids = [str(r.id) for r in retryable_rows]
+
+    # Create new job linked to the parent
+    new_jr = JobResult(
+        status="queued",
+        total=len(row_ids),
+        row_ids=row_ids,
+        user_id=uid,
+        parent_job_id=jr.id,
+    )
+    db.add(new_jr)
+    db.commit()
+    db.refresh(new_jr)
+
+    background_tasks.add_task(send_email_batch, new_jr.id, row_ids)
+    return {
+        "job_id": new_jr.id,
+        "status": "queued",
+        "total": len(row_ids),
+        "parent_job_id": jr.id,
+    }
+
+
+@router.post("/jobs/{job_id}/reschedule")
+@limiter.limit("30/minute")
+def reschedule_job(
+    job_id: str,
+    req: RescheduleJobRequest,
+    request: Request,
+    auth: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Reschedule a failed/stale/error job at a new time.
+
+    Creates a new scheduled JobResult targeting unsent rows from the
+    original job. The background poller will pick it up.
+    """
+    uid = get_user_id(auth)
+    _upsert_user_profile(auth, db)
+
+    jr = db.query(JobResult).get(job_id)
+    if not jr or jr.user_id != uid:
+        raise HTTPException(404, "Job not found")
+    if jr.status not in ("error", "stale", "completed", "cancelled"):
+        raise HTTPException(
+            400,
+            f"Cannot reschedule job in '{jr.status}' status. "
+            f"Only error, stale, completed, or cancelled jobs can be rescheduled.",
+        )
+
+    if not jr.row_ids:
+        raise HTTPException(400, "Job has no row_ids to reschedule")
+
+    # Convert local time → UTC
+    try:
+        tz = ZoneInfo(req.timezone)
+    except (KeyError, Exception):
+        raise HTTPException(400, f"Invalid timezone: {req.timezone}")
+
+    local_dt = req.run_at.replace(tzinfo=tz)
+    utc_dt = local_dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+    # Get rows that can be retried
+    retryable_rows = (
+        db.query(EmailColumn)
+        .filter(
+            EmailColumn.id.in_([str(rid) for rid in jr.row_ids]),
+            EmailColumn.sent_status.in_(["pending", "failed"]),
+            EmailColumn.user_id == uid,
+        )
+        .all()
+    )
+    if not retryable_rows:
+        raise HTTPException(400, "No retryable rows found (all already sent)")
+
+    # Reset rows and set scheduled_at
+    for row in retryable_rows:
+        row.sent_status = "pending"
+        row.sent_at = None
+        row.scheduled_at = utc_dt
+
+    row_ids = [str(r.id) for r in retryable_rows]
+
+    new_jr = JobResult(
+        status="scheduled",
+        total=len(row_ids),
+        row_ids=row_ids,
+        user_id=uid,
+        scheduled_at=utc_dt,
+        parent_job_id=jr.id,
+    )
+    db.add(new_jr)
+    db.commit()
+    db.refresh(new_jr)
+
+    return {
+        "job_id": new_jr.id,
+        "status": "scheduled",
+        "run_at": utc_dt.isoformat() + "Z",
+        "total": len(row_ids),
+        "parent_job_id": jr.id,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Clone job endpoint                                                           #
+# --------------------------------------------------------------------------- #
+
+@router.post("/jobs/{job_id}/clone")
+@limiter.limit("30/minute")
+def clone_job(
+    job_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Clone ALL rows from a finished job into fresh pending copies and send immediately.
+
+    Unlike rerun (which retries only failed/unsent rows in-place), this creates
+    brand-new EmailColumn rows — leaving the originals untouched — and dispatches
+    a new job to send the entire batch again.
+    """
+    from app.background import send_email_batch
+    uid = get_user_id(auth)
+    _upsert_user_profile(auth, db)
+
+    jr = db.query(JobResult).get(job_id)
+    if not jr or jr.user_id != uid:
+        raise HTTPException(404, "Job not found")
+    if jr.status not in ("error", "stale", "completed", "cancelled"):
+        raise HTTPException(
+            400,
+            f"Cannot clone job in '{jr.status}' status. "
+            f"Only completed, error, stale, or cancelled jobs can be cloned.",
+        )
+    if not jr.row_ids:
+        raise HTTPException(400, "Job has no rows to clone")
+
+    # Load ALL original rows (including already-sent ones)
+    original_rows = (
+        db.query(EmailColumn)
+        .filter(
+            EmailColumn.id.in_([str(rid) for rid in jr.row_ids]),
+            EmailColumn.user_id == uid,
+        )
+        .all()
+    )
+    if not original_rows:
+        raise HTTPException(400, "No rows found for this job")
+
+    # Clone each row as a fresh pending copy
+    new_rows = []
+    for orig in original_rows:
+        clone = EmailColumn(
+            sender_email=orig.sender_email,
+            recipient_name=orig.recipient_name,
+            recipient_email=orig.recipient_email,
+            company=orig.company,
+            position=orig.position,
+            template_file=orig.template_file,
+            framework=orig.framework,
+            my_strength=orig.my_strength,
+            audience_value=orig.audience_value,
+            custom_fields=orig.custom_fields,
+            sent_status="pending",
+            sent_at=None,
+            scheduled_at=None,
+            recruiter_id=orig.recruiter_id,
+            referral_id=orig.referral_id,
+            user_id=orig.user_id,
+        )
+        new_rows.append(clone)
+
+    db.add_all(new_rows)
+    db.flush()  # assign IDs
+    new_row_ids = [str(r.id) for r in new_rows]
+
+    # Create job linked to parent
+    new_jr = JobResult(
+        status="queued",
+        total=len(new_row_ids),
+        row_ids=new_row_ids,
+        user_id=uid,
+        parent_job_id=jr.id,
+    )
+    db.add(new_jr)
+    db.commit()
+    db.refresh(new_jr)
+
+    background_tasks.add_task(send_email_batch, new_jr.id, new_row_ids)
+    return {
+        "job_id": new_jr.id,
+        "status": "queued",
+        "total": len(new_row_ids),
+        "parent_job_id": jr.id,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -339,6 +597,7 @@ def get_job_detail(job_id: str, auth: dict = Depends(require_auth), db: Session 
         "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
         "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
         "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+        "parent_job_id": jr.parent_job_id,
         "emails": emails,
         "owner_email": owner_email,
     }
@@ -421,7 +680,7 @@ async def job_stream(request: Request, job_id: str, token: str = Query(...)):
             raise HTTPException(404, "Job not found")
         if not admin and jr.user_id != uid:
             raise HTTPException(404, "Job not found")
-        is_terminal = jr.status in ("completed", "error", "cancelled")
+        is_terminal = jr.status in ("completed", "error", "cancelled", "stale")
     finally:
         db.close()
 

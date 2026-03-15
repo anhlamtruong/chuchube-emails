@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getScheduledJobs, cancelScheduledJob } from "@/api/client";
+import { getScheduledJobs, cancelScheduledJob, rerunJob } from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import type { ScheduledJob, FinishedJob } from "@/api/client";
 import { useJobSSE } from "@/hooks/useJobSSE";
@@ -21,6 +21,8 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowUpRight,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,6 +54,7 @@ const STATUS_COLORS: Record<string, string> = {
   running: "oklch(0.65 0.2 145)",
   completed: "oklch(0.6 0.18 145)",
   error: "oklch(0.55 0.22 27)",
+  stale: "oklch(0.65 0.2 55)",
   cancelled: "oklch(0.55 0.02 250)",
 };
 
@@ -62,6 +65,7 @@ const statusVariant = (
     case "completed":
       return "default";
     case "error":
+    case "stale":
       return "destructive";
     case "cancelled":
       return "outline";
@@ -78,6 +82,7 @@ export default function ScheduledJobsPage() {
   const [showFinished, setShowFinished] = useState(true);
   const [loading, setLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -137,6 +142,19 @@ export default function ScheduledJobsPage() {
     }
   };
 
+  const handleRerun = async (jobId: string) => {
+    setRerunningId(jobId);
+    try {
+      const result = await rerunJob(jobId);
+      toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
+      navigate(`/scheduled-jobs/${result.job_id}`);
+    } catch {
+      toast.error("Failed to rerun job");
+    } finally {
+      setRerunningId(null);
+    }
+  };
+
   // Calendar events from all jobs
   const calendarEvents: EventInput[] = useMemo(() => {
     const allJobs = [...jobs, ...finished];
@@ -159,9 +177,38 @@ export default function ScheduledJobsPage() {
   const scheduledCount = jobs.filter(
     (j) => j.status === "queued" || j.status === "scheduled",
   ).length;
+  const staleCount = finished.filter((j) => j.status === "stale").length;
+  const failedJobCount = finished.filter(
+    (j) => j.status === "error" || j.status === "stale",
+  ).length;
 
   return (
     <div className="space-y-6">
+      {/* Stale/Failed Jobs Warning Banner */}
+      {failedJobCount > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 dark:border-orange-800 dark:bg-orange-950/30">
+          <AlertTriangle size={18} className="text-orange-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-orange-800 dark:text-orange-200">
+              {failedJobCount} scheduled job{failedJobCount !== 1 ? "s" : ""}{" "}
+              {staleCount > 0
+                ? `failed to execute (${staleCount} stale)`
+                : "encountered errors"}
+            </p>
+            <p className="text-xs text-orange-600 dark:text-orange-400">
+              Review and rerun from the Finished Jobs section below.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-orange-400 text-orange-700 hover:bg-orange-100 dark:border-orange-700 dark:text-orange-300"
+            onClick={() => setShowFinished(true)}
+          >
+            Review
+          </Button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -367,7 +414,7 @@ export default function ScheduledJobsPage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Progress</TableHead>
                       <TableHead>Completed</TableHead>
-                      <TableHead className="w-10" />
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -376,10 +423,18 @@ export default function ScheduledJobsPage() {
                         job.total > 0
                           ? ((job.sent + job.failed) / job.total) * 100
                           : 0;
+                      const canRerun =
+                        job.status === "stale" ||
+                        job.status === "error" ||
+                        (job.status === "completed" && job.failed > 0);
                       return (
                         <TableRow
                           key={job.job_id}
-                          className="cursor-pointer hover:bg-muted/50"
+                          className={`cursor-pointer hover:bg-muted/50 ${
+                            job.status === "stale"
+                              ? "bg-orange-50/50 dark:bg-orange-950/10"
+                              : ""
+                          }`}
                           onClick={() =>
                             navigate(`/scheduled-jobs/${job.job_id}`)
                           }
@@ -421,18 +476,41 @@ export default function ScheduledJobsPage() {
                               ? new Date(job.completed_at).toLocaleString()
                               : "—"}
                           </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/scheduled-jobs/${job.job_id}`);
-                              }}
-                              title="View details"
+                          <TableCell className="text-right">
+                            <div
+                              className="flex items-center justify-end gap-1"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <ArrowUpRight size={15} />
-                            </Button>
+                              {canRerun && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 gap-1.5 text-xs"
+                                  disabled={rerunningId === job.job_id}
+                                  onClick={() => handleRerun(job.job_id)}
+                                >
+                                  <RotateCcw
+                                    size={12}
+                                    className={
+                                      rerunningId === job.job_id
+                                        ? "animate-spin"
+                                        : ""
+                                    }
+                                  />
+                                  Rerun
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  navigate(`/scheduled-jobs/${job.job_id}`)
+                                }
+                                title="View details"
+                              >
+                                <ArrowUpRight size={15} />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );

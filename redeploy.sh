@@ -4,6 +4,10 @@ set -e
 
 cd "$(dirname "$0")"
 
+echo "=== Graceful drain: signalling backend to stop accepting work ==="
+docker compose stop -t 10 backend 2>/dev/null || true
+echo "  Backend stopped gracefully"
+
 echo "=== Building & starting all containers ==="
 docker compose up -d --build
 

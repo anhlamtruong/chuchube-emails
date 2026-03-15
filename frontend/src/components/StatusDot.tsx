@@ -6,6 +6,7 @@ const colorMap: Record<string, string> = {
   running: "bg-amber-500",
   completed: "bg-green-500",
   error: "bg-red-500",
+  stale: "bg-orange-500",
   cancelled: "bg-slate-400",
   sent: "bg-green-500",
   failed: "bg-red-500",

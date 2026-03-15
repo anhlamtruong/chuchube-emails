@@ -7,13 +7,14 @@ import {
   Search,
   X,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { getAdminJobs, adminCancelJob } from "../../api/client";
+import { getAdminJobs, adminCancelJob, adminForceErrorJob } from "../../api/client";
 import type { AdminJob, AdminJobFilters } from "../../api/client";
 
 export default function AdminJobsTab() {
@@ -28,6 +29,7 @@ export default function AdminJobsTab() {
   const [adminJobsSearch, setAdminJobsSearch] = useState("");
   const [adminJobsStatus, setAdminJobsStatus] = useState("");
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
+  const [forcingErrorJobId, setForcingErrorJobId] = useState<string | null>(null);
 
   const fetchAdminJobs = useCallback(
     async (page = 1, filters: AdminJobFilters = {}) => {
@@ -62,6 +64,23 @@ export default function AdminJobsTab() {
       toast.error(typeof detail === "string" ? detail : "Failed to cancel job");
     } finally {
       setCancellingJobId(null);
+    }
+  };
+
+  const handleForceError = async (jobId: string) => {
+    setForcingErrorJobId(jobId);
+    try {
+      await adminForceErrorJob(jobId);
+      toast.success("Job force-marked as error");
+      fetchAdminJobs(adminJobsPage, adminJobsFilters);
+    } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail = (e as any)?.response?.data?.detail;
+      toast.error(
+        typeof detail === "string" ? detail : "Failed to force-error job",
+      );
+    } finally {
+      setForcingErrorJobId(null);
     }
   };
 
@@ -263,6 +282,22 @@ export default function AdminJobsTab() {
                                 <Loader2 size={13} className="animate-spin" />
                               ) : (
                                 <Trash2 size={13} />
+                              )}
+                            </Button>
+                          )}
+                          {job.status === "running" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-orange-500 hover:text-orange-700"
+                              title="Force mark as error"
+                              onClick={() => handleForceError(job.job_id)}
+                              disabled={forcingErrorJobId === job.job_id}
+                            >
+                              {forcingErrorJobId === job.job_id ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <AlertTriangle size={13} />
                               )}
                             </Button>
                           )}

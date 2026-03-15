@@ -1,6 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getJobDetail, cancelScheduledJob } from "@/api/client";
+import {
+  getJobDetail,
+  cancelScheduledJob,
+  rerunJob,
+  rescheduleJob,
+  cloneJob,
+} from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import type { JobDetail, JobEmail } from "@/api/client";
 import { useJobSSE } from "@/hooks/useJobSSE";
@@ -30,7 +36,18 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Trash2, CheckCircle, XCircle, Clock } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  RotateCcw,
+  CalendarClock,
+  AlertTriangle,
+  Link2,
+  Copy,
+} from "lucide-react";
 import { toast } from "sonner";
 
 type EmailFilter = "all" | "sent" | "failed" | "pending";
@@ -44,6 +61,7 @@ const statusVariant = (
       return "default";
     case "error":
     case "failed":
+    case "stale":
       return "destructive";
     case "cancelled":
       return "outline";
@@ -82,6 +100,13 @@ export default function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<EmailFilter>("all");
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTz, setRescheduleTz] = useState(
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
 
   // Track row animations: row_id → animation class
   const [animatingRows, setAnimatingRows] = useState<Map<string, string>>(
@@ -110,7 +135,7 @@ export default function JobDetailPage() {
 
   // SSE: real-time updates
   const isTerminal = job
-    ? ["completed", "error", "cancelled"].includes(job.status)
+    ? ["completed", "error", "cancelled", "stale"].includes(job.status)
     : false;
 
   const handleJobUpdate = useCallback((data: JobUpdateEvent) => {
@@ -201,11 +226,68 @@ export default function JobDetailPage() {
     }
   };
 
+  const handleRerun = async () => {
+    if (!jobId) return;
+    setRerunning(true);
+    try {
+      const result = await rerunJob(jobId);
+      toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
+      navigate(`/scheduled-jobs/${result.job_id}`);
+    } catch {
+      toast.error("Failed to rerun job");
+    } finally {
+      setRerunning(false);
+    }
+  };
+
+  const handleClone = async () => {
+    if (!jobId) return;
+    setCloning(true);
+    try {
+      const result = await cloneJob(jobId);
+      toast.success(
+        `Cloned ${result.total} emails — new job ${result.job_id.slice(0, 8)}…`,
+      );
+      navigate(`/scheduled-jobs/${result.job_id}`);
+    } catch {
+      toast.error("Failed to clone job");
+    } finally {
+      setCloning(false);
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!jobId || !rescheduleDate) return;
+    try {
+      const result = await rescheduleJob(jobId, rescheduleDate, rescheduleTz);
+      toast.success(
+        `Rescheduled — new job ${result.job_id.slice(0, 8)}… at ${new Date(result.run_at).toLocaleString()}`,
+      );
+      navigate(`/scheduled-jobs/${result.job_id}`);
+    } catch {
+      toast.error("Failed to reschedule job");
+    } finally {
+      setShowReschedule(false);
+    }
+  };
+
   // Computed
   const progress =
     job && job.total > 0 ? ((job.sent + job.failed) / job.total) * 100 : 0;
 
   const remaining = job ? job.total - job.sent - job.failed : 0;
+
+  const canRerun = job
+    ? job.status === "stale" ||
+      job.status === "error" ||
+      (job.status === "completed" && job.failed > 0) ||
+      job.status === "cancelled"
+    : false;
+
+  // Clone & Send All / Reschedule are available on ANY terminal job
+  const canCloneOrReschedule = job
+    ? ["completed", "error", "stale", "cancelled"].includes(job.status)
+    : false;
 
   const filteredEmails =
     filter === "all" ? emails : emails.filter((e) => e.sent_status === filter);
@@ -271,6 +353,20 @@ export default function JobDetailPage() {
         <ArrowLeft size={14} /> Back to Jobs
       </Button>
 
+      {/* Stale Warning */}
+      {job.status === "stale" && (
+        <div className="flex items-center gap-3 rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/30 px-4 py-3 text-sm text-orange-800 dark:text-orange-300">
+          <AlertTriangle size={18} className="shrink-0" />
+          <div>
+            <p className="font-medium">This job became stale</p>
+            <p className="text-xs mt-0.5 opacity-80">
+              The scheduled time passed but rows were no longer dispatchable.
+              You can rerun the unsent rows or reschedule for a new time.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Card */}
       <Card>
         <CardContent className="pt-6">
@@ -318,18 +414,103 @@ export default function JobDetailPage() {
                     })}
                   </span>
                 )}
+                {job.parent_job_id && (
+                  <button
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    onClick={() =>
+                      navigate(`/scheduled-jobs/${job.parent_job_id}`)
+                    }
+                  >
+                    <Link2 size={12} /> Rerun of {job.parent_job_id.slice(0, 8)}
+                    …
+                  </button>
+                )}
               </div>
             </div>
-            {(job.status === "queued" || job.status === "scheduled") && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setCancelOpen(true)}
-              >
-                <Trash2 size={14} /> Cancel Job
-              </Button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {(job.status === "queued" || job.status === "scheduled") && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setCancelOpen(true)}
+                >
+                  <Trash2 size={14} /> Cancel Job
+                </Button>
+              )}
+              {canRerun && (
+                <Button size="sm" onClick={handleRerun} disabled={rerunning}>
+                  <RotateCcw
+                    size={14}
+                    className={rerunning ? "animate-spin" : ""}
+                  />
+                  {rerunning ? "Rerunning…" : "Rerun Now"}
+                </Button>
+              )}
+              {canCloneOrReschedule && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClone}
+                    disabled={cloning}
+                  >
+                    <Copy size={14} />
+                    {cloning ? "Cloning…" : "Clone & Send All"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowReschedule(!showReschedule)}
+                  >
+                    <CalendarClock size={14} /> Reschedule
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
+
+          {/* Inline Reschedule Form */}
+          {showReschedule && (
+            <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border bg-muted/50 p-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Date &amp; Time</label>
+                <input
+                  type="datetime-local"
+                  className="block rounded-md border px-3 py-1.5 text-sm"
+                  value={rescheduleDate}
+                  onChange={(e) => setRescheduleDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Timezone</label>
+                <select
+                  className="block rounded-md border px-3 py-1.5 text-sm"
+                  value={rescheduleTz}
+                  onChange={(e) => setRescheduleTz(e.target.value)}
+                >
+                  <option value="America/New_York">Eastern</option>
+                  <option value="America/Chicago">Central</option>
+                  <option value="America/Denver">Mountain</option>
+                  <option value="America/Los_Angeles">Pacific</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleReschedule}
+                disabled={!rescheduleDate}
+              >
+                Confirm Reschedule
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowReschedule(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

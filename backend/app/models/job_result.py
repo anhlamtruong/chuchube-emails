@@ -23,5 +23,6 @@ class JobResult(Base):
     errors: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     user_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    parent_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

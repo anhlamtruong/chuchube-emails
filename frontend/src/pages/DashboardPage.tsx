@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { getDashboard } from "@/api/client";
+import { getDashboard, rerunJob, cancelScheduledJob } from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useJobSSE } from "@/hooks/useJobSSE";
 import type { JobUpdateEvent } from "@/hooks/useJobSSE";
@@ -10,6 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+} from "@/components/ui/alert-dialog";
 import {
   Users,
   Table,
@@ -22,6 +30,10 @@ import {
   AlertTriangle,
   MessageSquare,
   MessageSquareWarning,
+  ChevronDown,
+  ChevronRight,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,12 +45,25 @@ interface UpcomingJob {
   created_at: string | null;
 }
 
+interface StaleJob {
+  job_id: string;
+  name: string;
+  status: string;
+  total: number;
+  sent: number;
+  failed: number;
+  created_at: string | null;
+  scheduled_at: string | null;
+  completed_at: string | null;
+}
+
 interface DashboardData {
   total_recruiters: number;
   total_campaigns: number;
   by_status: Record<string, number>;
   upcoming_jobs?: UpcomingJob[];
   stale_job_count?: number;
+  stale_jobs?: StaleJob[];
   threads_with_replies?: number;
   threads_needing_followup?: number;
 }
@@ -46,6 +71,9 @@ interface DashboardData {
 export default function DashboardPage() {
   usePageTitle("Dashboard");
   const [data, setData] = useState<DashboardData | null>(null);
+  const [staleExpanded, setStaleExpanded] = useState(false);
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [dismissTarget, setDismissTarget] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -67,6 +95,32 @@ export default function DashboardPage() {
       );
     }
   }, [data?.stale_job_count]);
+
+  const handleStaleRerun = async (jobId: string) => {
+    setRerunningId(jobId);
+    try {
+      const result = await rerunJob(jobId);
+      toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
+      navigate(`/scheduled-jobs/${result.job_id}`);
+    } catch {
+      toast.error("Failed to rerun job");
+    } finally {
+      setRerunningId(null);
+    }
+  };
+
+  const confirmDismiss = async () => {
+    if (!dismissTarget) return;
+    try {
+      await cancelScheduledJob(dismissTarget);
+      toast.success("Job dismissed");
+      load();
+    } catch {
+      toast.error("Failed to dismiss job");
+    } finally {
+      setDismissTarget(null);
+    }
+  };
 
   // SSE: live job updates on dashboard
   const hasActive = (data?.upcoming_jobs ?? []).some((j) =>
@@ -192,27 +246,125 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Stale Jobs Alert */}
+      {/* Stale Jobs Alert — expandable */}
       {(data.stale_job_count ?? 0) > 0 && (
-        <div
-          className="flex items-center justify-between rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/30 px-4 py-3 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50 transition-colors"
-          onClick={() => navigate("/scheduled-jobs")}
-        >
-          <div className="flex items-center gap-3">
-            <AlertTriangle size={18} className="text-orange-600 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-orange-800 dark:text-orange-300">
-                {data.stale_job_count} stale job
-                {data.stale_job_count! > 1 ? "s" : ""} need attention
-              </p>
-              <p className="text-xs text-orange-600 dark:text-orange-400">
-                These scheduled jobs never executed. Click to review and rerun.
-              </p>
+        <div className="rounded-lg border border-orange-300 bg-orange-50 dark:bg-orange-950/30 overflow-hidden">
+          <div
+            className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50 transition-colors"
+            onClick={() => setStaleExpanded((v) => !v)}
+          >
+            <div className="flex items-center gap-3">
+              <AlertTriangle size={18} className="text-orange-600 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                  {data.stale_job_count} stale job
+                  {data.stale_job_count! > 1 ? "s" : ""} need attention
+                </p>
+                <p className="text-xs text-orange-600 dark:text-orange-400">
+                  Click to expand and review.
+                  <span
+                    className="ml-2 underline hover:no-underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate("/scheduled-jobs");
+                    }}
+                  >
+                    View all →
+                  </span>
+                </p>
+              </div>
             </div>
+            {staleExpanded ? (
+              <ChevronDown size={16} className="text-orange-600 shrink-0" />
+            ) : (
+              <ChevronRight size={16} className="text-orange-600 shrink-0" />
+            )}
           </div>
-          <ArrowUpRight size={16} className="text-orange-600 shrink-0" />
+
+          {staleExpanded && (data.stale_jobs ?? []).length > 0 && (
+            <div className="border-t border-orange-200 dark:border-orange-800">
+              <div className="divide-y divide-orange-200 dark:divide-orange-800">
+                {data.stale_jobs!.map((job) => (
+                  <div
+                    key={job.job_id}
+                    className="flex items-center justify-between px-4 py-2.5 hover:bg-orange-100/50 dark:hover:bg-orange-950/40 transition-colors"
+                  >
+                    <div
+                      className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                      onClick={() => navigate(`/scheduled-jobs/${job.job_id}`)}
+                    >
+                      <StatusDot status={job.status} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate text-orange-900 dark:text-orange-200">
+                          {job.name}
+                        </p>
+                        <p className="text-xs text-orange-600 dark:text-orange-400">
+                          {job.scheduled_at
+                            ? new Date(job.scheduled_at).toLocaleString()
+                            : job.created_at
+                              ? new Date(job.created_at).toLocaleString()
+                              : "—"}
+                          <span className="ml-2">
+                            {job.sent}/{job.total} sent
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs border-orange-400 text-orange-700 hover:bg-orange-100 dark:border-orange-700 dark:text-orange-300"
+                        disabled={rerunningId === job.job_id}
+                        onClick={() => handleStaleRerun(job.job_id)}
+                      >
+                        <RotateCcw
+                          size={12}
+                          className={rerunningId === job.job_id ? "animate-spin" : ""}
+                        />
+                        Rerun
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
+                        onClick={() => setDismissTarget(job.job_id)}
+                      >
+                        <Trash2 size={12} />
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Dismiss Confirmation */}
+      <AlertDialog
+        open={dismissTarget !== null}
+        onOpenChange={(o) => !o && setDismissTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Dismiss Stale Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark the job as cancelled so it no longer appears as
+              stale. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => setDismissTarget(null)}>
+              Keep
+            </Button>
+            <Button variant="destructive" onClick={confirmDismiss}>
+              Dismiss
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

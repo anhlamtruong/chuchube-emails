@@ -299,16 +299,32 @@ def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
         .all()
     )
     # Stale jobs that need attention
-    stale_count = (
+    stale_rows = (
         db.query(JobResult)
         .filter(JobResult.user_id == uid, JobResult.status == "stale")
-        .count()
+        .order_by(JobResult.created_at.desc())
+        .limit(10)
+        .all()
     )
     return {
         "total_recruiters": total_recruiters,
         "total_campaigns": total_campaigns,
         "by_status": {s: c for s, c in statuses},
-        "stale_job_count": stale_count,
+        "stale_job_count": len(stale_rows),
+        "stale_jobs": [
+            {
+                "job_id": jr.id,
+                "name": f"Send batch ({jr.total} rows)",
+                "status": jr.status,
+                "total": jr.total,
+                "sent": jr.sent,
+                "failed": jr.failed,
+                "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
+                "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
+                "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+            }
+            for jr in stale_rows
+        ],
         "upcoming_jobs": [
             {
                 "job_id": jr.id,

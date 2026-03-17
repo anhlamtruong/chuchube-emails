@@ -23,6 +23,7 @@ import {
   ArrowUpRight,
   RotateCcw,
   AlertTriangle,
+  FilterX,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,6 +59,16 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "oklch(0.55 0.02 250)",
 };
 
+const ALL_STATUSES = [
+  "queued",
+  "scheduled",
+  "running",
+  "completed",
+  "error",
+  "stale",
+  "cancelled",
+] as const;
+
 const statusVariant = (
   status: string,
 ): "default" | "secondary" | "destructive" | "outline" => {
@@ -83,6 +94,9 @@ export default function ScheduledJobsPage() {
   const [loading, setLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(
+    () => new Set(ALL_STATUSES),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,24 +169,54 @@ export default function ScheduledJobsPage() {
     }
   };
 
-  // Calendar events from all jobs
+  const toggleFilter = useCallback((status: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  }, []);
+
+  const resetFilters = useCallback(() => {
+    setActiveFilters(new Set(ALL_STATUSES));
+  }, []);
+
+  const allFiltersActive = activeFilters.size === ALL_STATUSES.length;
+
+  // Calendar events from all jobs (filtered)
   const calendarEvents: EventInput[] = useMemo(() => {
     const allJobs = [...jobs, ...finished];
-    return allJobs.map((job) => ({
-      id: job.job_id,
-      title: `${job.name} (${job.sent}/${job.total})`,
-      start: job.scheduled_at ?? job.created_at ?? undefined,
-      backgroundColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
-      borderColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
-      extendedProps: { status: job.status, job },
-    }));
-  }, [jobs, finished]);
+    return allJobs
+      .filter((job) => activeFilters.has(job.status))
+      .map((job) => ({
+        id: job.job_id,
+        title: `${job.name} (${job.sent}/${job.total})`,
+        start: job.scheduled_at ?? job.created_at ?? undefined,
+        backgroundColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
+        borderColor: STATUS_COLORS[job.status] ?? STATUS_COLORS.queued,
+        extendedProps: { status: job.status, job },
+      }));
+  }, [jobs, finished, activeFilters]);
 
   const handleEventClick = (info: EventClickArg) => {
     navigate(`/scheduled-jobs/${info.event.id}`);
   };
 
-  // Stats
+  // Filtered lists for tables
+  const filteredJobs = useMemo(
+    () => jobs.filter((j) => activeFilters.has(j.status)),
+    [jobs, activeFilters],
+  );
+  const filteredFinished = useMemo(
+    () => finished.filter((j) => activeFilters.has(j.status)),
+    [finished, activeFilters],
+  );
+
+  // Stats (always unfiltered)
   const runningCount = jobs.filter((j) => j.status === "running").length;
   const scheduledCount = jobs.filter(
     (j) => j.status === "queued" || j.status === "scheduled",
@@ -242,6 +286,55 @@ export default function ScheduledJobsPage() {
         </Button>
       </div>
 
+      {/* Status Filter Pills */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Filter:</span>
+        {ALL_STATUSES.map((status) => {
+          const count = [...jobs, ...finished].filter(
+            (j) => j.status === status,
+          ).length;
+          const active = activeFilters.has(status);
+          return (
+            <button
+              key={status}
+              onClick={() => toggleFilter(status)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium capitalize transition-all border ${
+                active
+                  ? "opacity-100 shadow-sm"
+                  : "opacity-40 bg-muted border-transparent"
+              }`}
+              style={
+                active
+                  ? {
+                      backgroundColor: STATUS_COLORS[status] + "22",
+                      borderColor: STATUS_COLORS[status],
+                      color: STATUS_COLORS[status],
+                    }
+                  : undefined
+              }
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: STATUS_COLORS[status] }}
+              />
+              {status}
+              <span className="tabular-nums">{count}</span>
+            </button>
+          );
+        })}
+        {!allFiltersActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 text-xs text-muted-foreground px-2"
+            onClick={resetFilters}
+          >
+            <FilterX size={12} />
+            Reset
+          </Button>
+        )}
+      </div>
+
       {/* Calendar */}
       <Card>
         <CardContent className="pt-6 fc-themed">
@@ -280,9 +373,11 @@ export default function ScheduledJobsPage() {
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
-          ) : jobs.length === 0 ? (
+          ) : filteredJobs.length === 0 ? (
             <div className="px-6 py-12 text-center text-muted-foreground text-sm">
-              No active jobs. Use the Send page to create one.
+              {jobs.length === 0
+                ? "No active jobs. Use the Send page to create one."
+                : "No active jobs match the current filter."}
             </div>
           ) : (
             <Table>
@@ -298,7 +393,7 @@ export default function ScheduledJobsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {jobs.map((job) => {
+                {filteredJobs.map((job) => {
                   const pct =
                     job.total > 0
                       ? ((job.sent + job.failed) / job.total) * 100
@@ -401,9 +496,18 @@ export default function ScheduledJobsPage() {
             ) : (
               <ChevronRight size={16} />
             )}
-            Finished Jobs ({finished.length})
+            Finished Jobs ({filteredFinished.length}
+            {filteredFinished.length !== finished.length
+              ? ` of ${finished.length}`
+              : ""})
           </button>
-          {showFinished && (
+          {showFinished && filteredFinished.length === 0 ? (
+            <Card>
+              <CardContent className="px-6 py-8 text-center text-muted-foreground text-sm">
+                No finished jobs match the current filter.
+              </CardContent>
+            </Card>
+          ) : showFinished && (
             <Card>
               <CardContent className="p-0">
                 <Table>
@@ -418,7 +522,7 @@ export default function ScheduledJobsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {finished.map((job) => {
+                    {filteredFinished.map((job) => {
                       const pct =
                         job.total > 0
                           ? ((job.sent + job.failed) / job.total) * 100

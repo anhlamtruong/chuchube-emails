@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { getSSEToken } from "../api/sseToken";
 
 export interface JobUpdateEvent {
   job_id: string;
@@ -38,7 +38,7 @@ interface UseJobSSEOptions {
  * - If `jobId` is provided, connects to `/api/emails/jobs/{jobId}/stream`
  * - If omitted, connects to `/api/emails/jobs/stream` (global)
  *
- * Uses Clerk auth token as query param (EventSource can't set headers).
+ * Uses short-lived SSE tokens (not Clerk JWTs) as query param.
  * Auto-reconnects with exponential backoff.
  */
 export function useJobSSE({
@@ -48,7 +48,6 @@ export function useJobSSE({
   onJobFinished,
   enabled = true,
 }: UseJobSSEOptions) {
-  const { getToken } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const retryRef = useRef(0);
@@ -62,8 +61,8 @@ export function useJobSSE({
     if (!mountedRef.current || !enabled) return;
 
     try {
-      const token = await getToken();
-      if (!token || !mountedRef.current) return;
+      const token = await getSSEToken();
+      if (!mountedRef.current) return;
 
       const base = import.meta.env.VITE_API_URL ?? "";
       const path = jobId
@@ -132,7 +131,7 @@ export function useJobSSE({
         if (mountedRef.current && enabled) connect();
       }, delay);
     }
-  }, [getToken, jobId, enabled]);
+  }, [jobId, enabled]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -783,9 +783,7 @@ export default function SendPage() {
               <Button
                 size="sm"
                 disabled={
-                  oooSelected.size === 0 ||
-                  oooScheduling ||
-                  consentOk !== true
+                  oooSelected.size === 0 || oooScheduling || consentOk !== true
                 }
                 onClick={async () => {
                   setOooScheduling(true);
@@ -811,9 +809,7 @@ export default function SendPage() {
                       // If return date is today or past, schedule for tomorrow
                       const schedDate =
                         returnDate <= today
-                          ? new Date(
-                              today.getTime() + 24 * 60 * 60 * 1000,
-                            )
+                          ? new Date(today.getTime() + 24 * 60 * 60 * 1000)
                           : returnDate;
                       const key = schedDate.toISOString().split("T")[0];
                       const existing = groups.get(key) || [];
@@ -849,7 +845,11 @@ export default function SendPage() {
                       `Scheduled ${totalScheduled} re-send(s) across ${groups.size} date(s)`,
                     );
                     setOooSelected(new Set());
-                    await Promise.all([load(), loadFailed(), loadOooResendable()]);
+                    await Promise.all([
+                      load(),
+                      loadFailed(),
+                      loadOooResendable(),
+                    ]);
                   } catch {
                     toast.error("Failed to schedule OOO re-sends");
                   } finally {

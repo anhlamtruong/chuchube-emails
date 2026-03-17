@@ -69,6 +69,8 @@ class EmailColumnOut(EmailColumnBase):
     id: str
     sent_at: datetime | None = None
     scheduled_at: datetime | None = None
+    thread_id: str | None = None
+    message_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

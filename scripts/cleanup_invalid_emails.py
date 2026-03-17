@@ -14,7 +14,8 @@ import re
 import sys
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+import psycopg2
+from psycopg2 import sql
 
 load_dotenv()
 
@@ -37,43 +38,55 @@ FIX_MODE = "--fix" in sys.argv
 
 
 def main() -> None:
-    engine = create_engine(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL)
     total_bad = 0
 
-    with engine.connect() as conn:
-        for table, columns in TARGETS:
-            for col in columns:
-                rows = conn.execute(
-                    text(f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''")  # noqa: S608
-                ).fetchall()
+    try:
+        with conn.cursor() as cur:
+            for table, columns in TARGETS:
+                for col in columns:
+                    # Use sql.Identifier to safely inject table/column names
+                    query = sql.SQL(
+                        "SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''"
+                    ).format(
+                        col=sql.Identifier(col),
+                        table=sql.Identifier(table),
+                    )
+                    cur.execute(query)
+                    rows = cur.fetchall()
 
-                bad_rows = [
-                    (row_id, email)
-                    for row_id, email in rows
-                    if not EMAIL_RE.match(str(email).strip())
-                ]
+                    bad_rows = [
+                        (row_id, email)
+                        for row_id, email in rows
+                        if not EMAIL_RE.match(str(email).strip())
+                    ]
 
-                if bad_rows:
-                    print(f"\n{'='*60}")
-                    print(f"  {table}.{col}: {len(bad_rows)} invalid email(s)")
-                    print(f"{'='*60}")
-                    for row_id, email in bad_rows[:20]:
-                        print(f"  id={row_id}  email={email!r}")
-                    if len(bad_rows) > 20:
-                        print(f"  ... and {len(bad_rows) - 20} more")
+                    if bad_rows:
+                        print(f"\n{'='*60}")
+                        print(f"  {table}.{col}: {len(bad_rows)} invalid email(s)")
+                        print(f"{'='*60}")
+                        for row_id, email in bad_rows[:20]:
+                            print(f"  id={row_id}  email={email!r}")
+                        if len(bad_rows) > 20:
+                            print(f"  ... and {len(bad_rows) - 20} more")
 
-                    if FIX_MODE:
-                        ids = [r[0] for r in bad_rows]
-                        # Set bad emails to empty string (rather than NULL) to
-                        # avoid NOT NULL constraint violations
-                        conn.execute(
-                            text(f"UPDATE {table} SET {col} = '' WHERE id = ANY(:ids)"),  # noqa: S608
-                            {"ids": ids},
-                        )
-                        conn.commit()
-                        print(f"  => FIXED: set {len(ids)} row(s) to empty string")
+                        if FIX_MODE:
+                            ids = [r[0] for r in bad_rows]
+                            # Set bad emails to empty string (rather than NULL) to
+                            # avoid NOT NULL constraint violations
+                            update_query = sql.SQL(
+                                "UPDATE {table} SET {col} = '' WHERE id = ANY(%s)"
+                            ).format(
+                                table=sql.Identifier(table),
+                                col=sql.Identifier(col),
+                            )
+                            cur.execute(update_query, (ids,))
+                            conn.commit()
+                            print(f"  => FIXED: set {len(ids)} row(s) to empty string")
 
-                    total_bad += len(bad_rows)
+                        total_bad += len(bad_rows)
+    finally:
+        conn.close()
 
     if total_bad == 0:
         print("\nAll email addresses look valid. Nothing to clean up.")

@@ -4,7 +4,7 @@ Endpoints gated by role: master_admin or admin (some master_admin only).
 """
 import secrets
 import bcrypt
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_, func as sa_func
@@ -421,7 +421,7 @@ def admin_cancel_job(
     jr = db.query(JobResult).get(job_id)
     if not jr:
         raise HTTPException(404, "Job not found")
-    if jr.status not in ("queued", "scheduled"):
+    if jr.status not in ("queued", "scheduled", "error", "stale"):
         raise HTTPException(400, f"Cannot cancel job in '{jr.status}' status")
 
     # Clear scheduled_at on pending rows (same as user-level cancel)
@@ -439,6 +439,8 @@ def admin_cancel_job(
             row.scheduled_at = None
 
     jr.status = "cancelled"
+    if not jr.completed_at:
+        jr.completed_at = datetime.now(tz=timezone.utc)
     db.commit()
 
     admin_uid = get_user_id(auth)
@@ -462,7 +464,6 @@ def admin_force_error_job(
             f"Job is '{jr.status}' — only running/queued jobs can be force-errored",
         )
 
-    from datetime import timezone
     jr.status = "error"
     jr.errors = (jr.errors or []) + [
         f"Force-errored by admin at {datetime.now(tz=timezone.utc).isoformat()}Z"

@@ -20,6 +20,8 @@ import {
   Calendar,
   ArrowUpRight,
   AlertTriangle,
+  MessageSquare,
+  MessageSquareWarning,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,6 +39,8 @@ interface DashboardData {
   by_status: Record<string, number>;
   upcoming_jobs?: UpcomingJob[];
   stale_job_count?: number;
+  threads_with_replies?: number;
+  threads_needing_followup?: number;
 }
 
 export default function DashboardPage() {
@@ -147,6 +151,20 @@ export default function DashboardPage() {
       color: "text-amber-600",
       bg: "bg-amber-50",
     },
+    {
+      label: "Replies",
+      value: data.threads_with_replies ?? 0,
+      icon: MessageSquare,
+      color: "text-teal-600",
+      bg: "bg-teal-50",
+    },
+    {
+      label: "Need Follow-up",
+      value: data.threads_needing_followup ?? 0,
+      icon: MessageSquareWarning,
+      color: "text-orange-600",
+      bg: "bg-orange-50",
+    },
   ];
 
   return (
@@ -197,7 +215,7 @@ export default function DashboardPage() {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {cards.map(({ label, value, icon: Icon, color, bg }) => (
           <Card key={label}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">

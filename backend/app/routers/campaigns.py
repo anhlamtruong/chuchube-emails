@@ -176,8 +176,7 @@ def delete_campaign(row_id: str, auth: dict = Depends(require_auth), db: Session
     return {"ok": True}
 
 
-class BulkDeleteRequest(BaseModel):
-    ids: list[str]
+from app.schemas.requests import BulkDeleteRequest  # noqa: E402
 
 
 @router.post("/bulk/delete")
@@ -193,12 +192,7 @@ def bulk_delete_campaigns(request: Request, body: BulkDeleteRequest, auth: dict 
 
 # --- Generate campaigns from recruiter filters ---
 
-class GenerateFromRecruitersRequest(BaseModel):
-    recruiter_ids: list[str]
-    sender_email: str = ""
-    template_file: str = ""
-    position: str = ""
-    custom_field_overrides: dict[str, str] = {}
+from app.schemas.requests import GenerateFromRecruitersRequest  # noqa: E402
 
 
 @router.post("/generate-from-recruiters")
@@ -241,12 +235,7 @@ def generate_from_recruiters(request: Request, req: GenerateFromRecruitersReques
 
 # --- Generate campaigns from referral filters ---
 
-class GenerateFromReferralsRequest(BaseModel):
-    referral_ids: list[str]
-    sender_email: str = ""
-    template_file: str = ""
-    position: str = ""
-    custom_field_overrides: dict[str, str] = {}
+from app.schemas.requests import GenerateFromReferralsRequest  # noqa: E402
 
 
 @router.post("/generate-from-referrals")
@@ -289,21 +278,7 @@ def generate_from_referrals(request: Request, req: GenerateFromReferralsRequest,
 
 # --- Bulk paste: CSV rows → Recruiter DB + Campaign rows ---
 
-class BulkPasteRow(BaseModel):
-    name: str = ""
-    email: str = ""
-    title: str = ""
-    company: str = ""
-    location: str = ""
-    notes: str = ""
-
-
-class BulkPasteRequest(BaseModel):
-    rows: list[BulkPasteRow]
-    sender_email: str = ""
-    template_file: str = ""
-    position: str = ""
-    custom_field_overrides: dict[str, str] = {}
+from app.schemas.requests import BulkPasteRow, BulkPasteRequest  # noqa: E402
 
 
 @router.post("/bulk-paste")

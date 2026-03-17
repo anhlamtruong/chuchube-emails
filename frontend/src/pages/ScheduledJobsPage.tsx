@@ -427,6 +427,8 @@ export default function ScheduledJobsPage() {
                         job.status === "stale" ||
                         job.status === "error" ||
                         (job.status === "completed" && job.failed > 0);
+                      const canDismiss =
+                        job.status === "error" || job.status === "stale";
                       return (
                         <TableRow
                           key={job.job_id}
@@ -500,6 +502,17 @@ export default function ScheduledJobsPage() {
                                   Rerun
                                 </Button>
                               )}
+                              {canDismiss && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
+                                  onClick={() => setCancelTarget(job.job_id)}
+                                >
+                                  <Trash2 size={12} />
+                                  Dismiss
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -530,10 +543,25 @@ export default function ScheduledJobsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel Job</AlertDialogTitle>
+            <AlertDialogTitle>
+              {(() => {
+                const t = [...jobs, ...finished].find(
+                  (j) => j.job_id === cancelTarget,
+                );
+                return t?.status === "error" || t?.status === "stale"
+                  ? "Dismiss Job"
+                  : "Cancel Job";
+              })()}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to cancel this scheduled job? This action
-              cannot be undone.
+              {(() => {
+                const t = [...jobs, ...finished].find(
+                  (j) => j.job_id === cancelTarget,
+                );
+                return t?.status === "error" || t?.status === "stale"
+                  ? "This will mark the job as cancelled so it no longer appears as an active error."
+                  : "Are you sure you want to cancel this scheduled job? This action cannot be undone.";
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Assets: check multiple locations (local dev vs Docker)
 _assets_candidates = [
     BASE_DIR / "assets",
+    BASE_DIR.parent / "archive" / "sending_email" / "assets",
     BASE_DIR.parent / "sending_email" / "assets",
     Path("/app/sending_email/assets"),
 ]
@@ -60,6 +61,13 @@ ACCESS_KEY_ENABLED = os.getenv("ACCESS_KEY_ENABLED", "true").lower() in ("true",
 # Set this in .env for fresh-database migrations; no runtime code uses it.
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "")
 ACCESS_MASTER_KEY = os.getenv("ACCESS_MASTER_KEY", "")
+
+# --- SSE Tokens ---
+# Short-lived tokens for Server-Sent Events (avoids exposing Clerk JWT in URLs).
+# Auto-generated per-process if not set; set explicitly for multi-instance deploys.
+import secrets as _secrets
+SSE_TOKEN_SECRET = os.getenv("SSE_TOKEN_SECRET", _secrets.token_urlsafe(32))
+SSE_TOKEN_TTL = int(os.getenv("SSE_TOKEN_TTL", "60"))  # seconds
 
 # --- Ollama / LLM ---
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")

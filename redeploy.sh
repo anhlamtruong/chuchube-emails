@@ -8,12 +8,19 @@ echo "=== Graceful drain: signalling backend to stop accepting work ==="
 docker compose stop -t 10 backend 2>/dev/null || true
 echo "  Backend stopped gracefully"
 
-echo "=== Building & starting all containers ==="
-docker compose up -d --build
+echo "=== Building all images ==="
+docker compose build
 
 echo ""
-echo "=== Running database migrations ==="
-docker compose exec backend alembic upgrade head
+echo "=== Running database migrations (before starting backend) ==="
+# Run migrations in a one-off container so the app doesn't start until schema is ready
+docker compose run --rm --no-deps backend alembic upgrade head && \
+  echo "  ✓ Migrations applied" || \
+  echo "  ⚠ Migration failed — check logs above"
+
+echo ""
+echo "=== Starting all containers ==="
+docker compose up -d
 
 echo ""
 echo "=== Pulling Ollama model (background) ==="

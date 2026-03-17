@@ -20,6 +20,7 @@ import {
   Coffee,
   Heart,
   ShieldAlert,
+  MessageSquare,
 } from "lucide-react";
 import { checkAdmin } from "../api/client";
 
@@ -32,6 +33,7 @@ const navItems = [
   { to: "/documents", label: "Documents", icon: Paperclip },
   { to: "/send", label: "Send Emails", icon: Send },
   { to: "/scheduled-jobs", label: "Scheduled Jobs", icon: Calendar },
+  { to: "/follow-ups", label: "Follow-Up Queue", icon: MessageSquare },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

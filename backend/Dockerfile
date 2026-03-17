@@ -14,9 +14,9 @@ COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini .
 
-# Copy sending_email templates + assets for seeding & attachments
-COPY sending_email/templates ./sending_email/templates
-COPY sending_email/assets ./sending_email/assets
+# Copy sending_email templates + assets for seeding & attachments (archived)
+COPY archive/sending_email/templates ./sending_email/templates
+COPY archive/sending_email/assets ./sending_email/assets
 
 # Create data directory and non-root user
 RUN mkdir -p /app/data \

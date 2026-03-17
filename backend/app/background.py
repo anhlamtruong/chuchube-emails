@@ -569,14 +569,7 @@ def send_email_batch(job_result_id: str, row_ids: list[str]):
             "completed_at": datetime.now(tz=timezone.utc).isoformat() + "Z",
         })
     except Exception as e:
-        logger.error(f"Job {job_result_id}: failed to finalize — {e}\n{traceback.format_exc()}")
-        try:
-            _safe_db_update(
-                lambda db, _e=str(e): _set_job_error(db, job_result_id, f"Finalize error: {_e}"),
-                f"job {job_result_id} → error (finalize failed)",
-            )
-        except Exception:
-            logger.error(f"Job {job_result_id}: could not mark as error after finalize crash")
+        logger.error(f"Job {job_result_id}: failed to finalize — {e}")
 
 
 def _set_job_error(db, job_result_id: str, error_msg: str):
@@ -789,6 +782,8 @@ def _check_due_rows():
             .with_for_update(skip_locked=True)
             .all()
         )
+        if not scheduled_jobs:
+            return
 
         for jr in scheduled_jobs:
             # Skip if this job is already running
@@ -879,69 +874,14 @@ def _check_due_rows():
                     "sent": jr.sent, "failed": jr.failed, "total": jr.total,
                     "completed_at": jr.completed_at.isoformat() + "Z",
                 })
-
-        # --- Stuck-running detection ---
-        # Mark "running" jobs that are NOT in the _running_jobs in-memory set
-        # and were created >2 hours ago.  This catches jobs that crashed without
-        # being marked as error (e.g. process restart, OOM kill).
-        _STUCK_THRESHOLD = timedelta(hours=2)
-        stuck_cutoff = now - _STUCK_THRESHOLD
-
-        stuck_candidates = (
-            db.query(JobResult)
-            .filter(
-                JobResult.status == "running",
-                JobResult.created_at != None,  # noqa: E711
-                JobResult.created_at <= stuck_cutoff,
-            )
-            .with_for_update(skip_locked=True)
-            .all()
-        )
-
-        for jr in stuck_candidates:
-            with _running_jobs_lock:
-                if jr.id in _running_jobs:
-                    continue  # genuinely still running in this process
-
-            reason = (
-                f"Job has been in 'running' status since "
-                f"{jr.created_at.isoformat()}Z (>{_STUCK_THRESHOLD.total_seconds() / 3600:.0f}h) "
-                f"but is not tracked in the current process. "
-                f"Likely crashed or process was restarted."
-            )
-            jr.status = "error"
-            jr.errors = (jr.errors or []) + [reason]
-            jr.completed_at = datetime.now(tz=timezone.utc)
-            db.commit()
-            logger.warning(f"Stuck running job detected: {jr.id} — {reason}")
-            _publish_event(jr.id, "job_finished", {
-                "job_id": jr.id, "status": "error",
-                "sent": jr.sent, "failed": jr.failed, "total": jr.total,
-                "completed_at": jr.completed_at.isoformat() + "Z",
-            })
     finally:
         db.close()
 
 
 def _run_job_then_cleanup(job_id: str, row_ids: list[str]):
-    """Run send_email_batch and remove from _running_jobs on completion.
-
-    Catches any unhandled exception that escapes send_email_batch and
-    force-marks the job as error so it never stays stuck in 'running'.
-    """
+    """Run send_email_batch and remove from _running_jobs on completion."""
     try:
         send_email_batch(job_id, row_ids)
-    except Exception as exc:
-        logger.critical(
-            f"Job {job_id}: unhandled crash in send_email_batch — {exc}\n{traceback.format_exc()}"
-        )
-        try:
-            _safe_db_update(
-                lambda db, _jid=job_id, _e=str(exc): _set_job_error(db, _jid, f"Unhandled error: {_e}"),
-                f"job {job_id} → error (unhandled crash)",
-            )
-        except Exception:
-            logger.error(f"Job {job_id}: could not mark as error after crash")
     finally:
         with _running_jobs_lock:
             _running_jobs.discard(job_id)

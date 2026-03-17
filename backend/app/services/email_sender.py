@@ -4,6 +4,7 @@ import ssl
 import os
 import mimetypes
 from email.message import EmailMessage
+from email.utils import make_msgid
 
 
 def login_to_server(smtp_server: str, port: int, sender_email: str, password: str):
@@ -30,12 +31,28 @@ def send_email(
     body: str,
     attachment_paths: list | None = None,
     inline_image_path: str | None = None,
-) -> bool:
-    """Sends a single email using the active server connection."""
+    in_reply_to: str | None = None,
+    references: str | None = None,
+) -> str:
+    """Sends a single email using the active server connection.
+
+    Returns the Message-ID of the sent email for thread tracking.
+    """
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = sender_email
     msg["To"] = recipient_email
+
+    # Generate a deterministic Message-ID we can track
+    domain = sender_email.split("@")[1] if "@" in sender_email else "localhost"
+    msg_id = make_msgid(domain=domain)
+    msg["Message-ID"] = msg_id
+
+    # Threading headers for reply chains
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
 
     # 1. Inline image (related)
     if inline_image_path and os.path.exists(inline_image_path):
@@ -96,7 +113,7 @@ def send_email(
                         )
 
     server.send_message(msg)
-    return True
+    return msg_id
 
 
 def send_email_resend(
@@ -107,6 +124,8 @@ def send_email_resend(
     subject: str,
     html_body: str,
     attachments: list | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> dict:
     """Send an email via the Resend HTTP API (no global state).
 
@@ -139,6 +158,15 @@ def send_email_resend(
                 })
         if resend_attachments:
             payload["attachments"] = resend_attachments
+
+    # Threading headers
+    headers = {}
+    if in_reply_to:
+        headers["In-Reply-To"] = in_reply_to
+    if references:
+        headers["References"] = references
+    if headers:
+        payload["headers"] = headers
 
     resp = httpx.post(
         "https://api.resend.com/emails",

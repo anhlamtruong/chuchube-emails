@@ -32,5 +32,10 @@ class EmailColumn(Base):
     )
     referral = relationship("Referral", backref="email_columns", lazy="select")
     user_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    # Thread tracking
+    thread_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("email_threads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    message_id: Mapped[str | None] = mapped_column(String(500), nullable=True)  # RFC 2822 Message-ID
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

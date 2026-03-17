@@ -19,6 +19,7 @@ const SendPage = lazy(() => import("./pages/SendPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const ScheduledJobsPage = lazy(() => import("./pages/ScheduledJobsPage"));
 const JobDetailPage = lazy(() => import("./pages/JobDetailPage"));
+const FollowUpQueuePage = lazy(() => import("./pages/FollowUpQueuePage"));
 const TermsPage = lazy(() => import("./pages/TermsPage"));
 const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
 const ConsentPage = lazy(() => import("./pages/ConsentPage"));
@@ -95,6 +96,10 @@ function App() {
                         <Route
                           path="/scheduled-jobs/:id"
                           element={<JobDetailPage />}
+                        />
+                        <Route
+                          path="/follow-ups"
+                          element={<FollowUpQueuePage />}
                         />
                         <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/terms" element={<TermsPage />} />

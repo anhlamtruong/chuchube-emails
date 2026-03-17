@@ -14,7 +14,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { getAdminJobs, adminCancelJob, adminForceErrorJob } from "../../api/client";
+import {
+  getAdminJobs,
+  adminCancelJob,
+  adminForceErrorJob,
+} from "../../api/client";
 import type { AdminJob, AdminJobFilters } from "../../api/client";
 
 export default function AdminJobsTab() {
@@ -29,7 +33,9 @@ export default function AdminJobsTab() {
   const [adminJobsSearch, setAdminJobsSearch] = useState("");
   const [adminJobsStatus, setAdminJobsStatus] = useState("");
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
-  const [forcingErrorJobId, setForcingErrorJobId] = useState<string | null>(null);
+  const [forcingErrorJobId, setForcingErrorJobId] = useState<string | null>(
+    null,
+  );
 
   const fetchAdminJobs = useCallback(
     async (page = 1, filters: AdminJobFilters = {}) => {
@@ -270,7 +276,9 @@ export default function AdminJobsTab() {
                             <ExternalLink size={13} />
                           </Button>
                           {(job.status === "queued" ||
-                            job.status === "scheduled") && (
+                            job.status === "scheduled" ||
+                            job.status === "error" ||
+                            job.status === "stale") && (
                             <Button
                               variant="ghost"
                               size="sm"

@@ -437,6 +437,16 @@ export default function JobDetailPage() {
                   <Trash2 size={14} /> Cancel Job
                 </Button>
               )}
+              {(job.status === "error" || job.status === "stale") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                  onClick={() => setCancelOpen(true)}
+                >
+                  <Trash2 size={14} /> Dismiss
+                </Button>
+              )}
               {canRerun && (
                 <Button size="sm" onClick={handleRerun} disabled={rerunning}>
                   <RotateCcw
@@ -685,10 +695,15 @@ export default function JobDetailPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel Job</AlertDialogTitle>
+            <AlertDialogTitle>
+              {job?.status === "error" || job?.status === "stale"
+                ? "Dismiss Job"
+                : "Cancel Job"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to cancel this scheduled job? This action
-              cannot be undone.
+              {job?.status === "error" || job?.status === "stale"
+                ? "This will mark the job as cancelled so it no longer appears as an active error. You can still rerun it later."
+                : "Are you sure you want to cancel this scheduled job? This action cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -696,7 +711,9 @@ export default function JobDetailPage() {
               Keep
             </Button>
             <Button variant="destructive" onClick={confirmCancel}>
-              Cancel Job
+              {job?.status === "error" || job?.status === "stale"
+                ? "Dismiss"
+                : "Cancel Job"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

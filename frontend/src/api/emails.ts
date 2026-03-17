@@ -1,5 +1,5 @@
 import api from "./instance";
-import { getClerkToken } from "./instance";
+import { getSSEToken } from "./sseToken";
 
 // --- Emails ---
 export const sendEmails = (rowIds: string[]) =>
@@ -230,10 +230,10 @@ export interface ScanEmailEvent {
 /**
  * Subscribe to the per-email SSE stream during a running scan.
  * Returns an EventSource instance. Caller should attach onmessage / onerror.
- * Requires a Clerk token since EventSource cannot set Authorization headers.
+ * Uses a short-lived SSE token (EventSource cannot set Authorization headers).
  */
 export async function subscribeScanStream(): Promise<EventSource> {
-  const token = (await getClerkToken()) || "";
+  const token = await getSSEToken();
   return new EventSource(
     `/api/bounces/scan/stream?token=${encodeURIComponent(token)}`,
   );

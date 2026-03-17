@@ -260,7 +260,7 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
     jr = db.query(JobResult).get(job_id)
     if not jr or jr.user_id != uid:
         raise HTTPException(404, "Job not found")
-    if jr.status not in ("queued", "scheduled"):
+    if jr.status not in ("queued", "scheduled", "error", "stale"):
         raise HTTPException(400, f"Cannot cancel job in '{jr.status}' status")
 
     # Clear scheduled_at only on rows belonging to THIS job
@@ -278,6 +278,8 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
             row.scheduled_at = None
 
     jr.status = "cancelled"
+    if not jr.completed_at:
+        jr.completed_at = datetime.now(tz=timezone.utc)
     db.commit()
     return {"job_id": jr.id, "status": "cancelled"}
 
@@ -286,9 +288,7 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
 # Rerun / Reschedule endpoints                                                 #
 # --------------------------------------------------------------------------- #
 
-class RescheduleJobRequest(BaseModel):
-    run_at: datetime
-    timezone: str = "UTC"
+from app.schemas.requests import RescheduleJobRequest
 
 
 @router.post("/jobs/{job_id}/rerun")

@@ -9,7 +9,7 @@ services:
       - FRONTEND_URL=http://localhost
       - OLLAMA_URL=http://ollama:11434
     volumes:
-      - ./sending_email/assets:/app/sending_email/assets
+      - ./archive/sending_email/assets:/app/sending_email/assets
       # Shared backup volume — backend needs write access for .trigger file
       - ./backups:/backups
     # Backend not exposed publicly — frontend proxies via nginx
@@ -19,7 +19,7 @@ services:
       ollama:
         condition: service_started
     restart: unless-stopped
-    stop_grace_period: 60s      # let in-flight email batches finish before SIGKILL
+    stop_grace_period: 60s # let in-flight email batches finish before SIGKILL
     deploy:
       resources:
         limits:
@@ -46,6 +46,8 @@ services:
     container_name: chuchube-emails-frontend
     ports:
       - "80:80"
+      # Uncomment for TLS:
+      # - "443:443"
     depends_on:
       backend:
         condition: service_healthy

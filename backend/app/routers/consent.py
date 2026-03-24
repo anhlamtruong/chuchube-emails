@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.auth import require_auth, get_user_id
+from app.schemas.email_column import _utc_iso
 from app.models.user_consent import (
     UserConsent,
     CURRENT_CONSENT_VERSIONS,
@@ -56,7 +57,7 @@ def get_consent_status(
             "consent_type": ctype,
             "required_version": version,
             "accepted": record is not None,
-            "accepted_at": record.accepted_at.isoformat() + "Z" if record else None,
+            "accepted_at": _utc_iso(record.accepted_at) if record else None,
         })
 
     all_accepted = all(c["accepted"] for c in result)
@@ -164,7 +165,7 @@ def get_consent_history(
             {
                 "consent_type": r.consent_type,
                 "version": r.version,
-                "accepted_at": r.accepted_at.isoformat() + "Z" if r.accepted_at else None,
+                "accepted_at": _utc_iso(r.accepted_at),
                 "ip_address": r.ip_address,
             }
             for r in records

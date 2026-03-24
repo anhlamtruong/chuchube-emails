@@ -6,6 +6,7 @@ import {
   rerunJob,
   rescheduleJob,
   cloneJob,
+  extractApiError,
 } from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import type { JobDetail, JobEmail } from "@/api/client";
@@ -14,6 +15,14 @@ import type { EmailUpdateEvent, JobUpdateEvent } from "@/hooks/useJobSSE";
 import ProgressRing from "@/components/ProgressRing";
 import StatusDot from "@/components/StatusDot";
 import { formatDistanceToNow } from "date-fns";
+
+/** Safely format a date string as relative time; returns null if the value is unparseable. */
+const safeDistanceToNow = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatDistanceToNow(d, { addSuffix: true });
+};
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -233,8 +242,8 @@ export default function JobDetailPage() {
       const result = await rerunJob(jobId);
       toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
       navigate(`/scheduled-jobs/${result.job_id}`);
-    } catch {
-      toast.error("Failed to rerun job");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to rerun job"));
     } finally {
       setRerunning(false);
     }
@@ -249,8 +258,8 @@ export default function JobDetailPage() {
         `Cloned ${result.total} emails — new job ${result.job_id.slice(0, 8)}…`,
       );
       navigate(`/scheduled-jobs/${result.job_id}`);
-    } catch {
-      toast.error("Failed to clone job");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to clone job"));
     } finally {
       setCloning(false);
     }
@@ -396,22 +405,24 @@ export default function JobDetailPage() {
                 {job.created_at && (
                   <span>
                     Created{" "}
-                    {formatDistanceToNow(new Date(job.created_at), {
-                      addSuffix: true,
-                    })}
+                    {safeDistanceToNow(job.created_at) ?? job.created_at}
                   </span>
                 )}
                 {job.scheduled_at && (
                   <span>
-                    Scheduled for {new Date(job.scheduled_at).toLocaleString()}
+                    Scheduled for{" "}
+                    {(() => {
+                      const d = new Date(job.scheduled_at!);
+                      return Number.isNaN(d.getTime())
+                        ? job.scheduled_at
+                        : d.toLocaleString();
+                    })()}
                   </span>
                 )}
                 {job.completed_at && (
                   <span>
                     {job.status === "completed" ? "Completed" : "Ended"}{" "}
-                    {formatDistanceToNow(new Date(job.completed_at), {
-                      addSuffix: true,
-                    })}
+                    {safeDistanceToNow(job.completed_at) ?? job.completed_at}
                   </span>
                 )}
                 {job.parent_job_id && (
@@ -650,11 +661,7 @@ export default function JobDetailPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs">
-                        {email.sent_at
-                          ? formatDistanceToNow(new Date(email.sent_at), {
-                              addSuffix: true,
-                            })
-                          : "—"}
+                        {safeDistanceToNow(email.sent_at) ?? "—"}
                       </TableCell>
                     </TableRow>
                   ))

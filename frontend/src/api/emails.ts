@@ -1,6 +1,41 @@
 import api from "./instance";
 import { getSSEToken } from "./sseToken";
 
+/**
+ * Extract a human-readable message from an axios error response.
+ * Returns the conflict detail for HTTP 409, or a generic fallback.
+ */
+export function extractApiError(err: unknown, fallback: string): string {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "response" in err &&
+    typeof (err as Record<string, unknown>).response === "object"
+  ) {
+    const resp = (
+      err as { response: { status?: number; data?: { detail?: string } } }
+    ).response;
+    if (resp?.status === 409 && resp.data?.detail) {
+      return resp.data.detail;
+    }
+    if (resp?.data?.detail) {
+      return resp.data.detail;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Returns true if the error is an HTTP 409 Conflict.
+ */
+export function isConflictError(err: unknown): boolean {
+  if (typeof err === "object" && err !== null && "response" in err) {
+    const resp = (err as { response: { status?: number } }).response;
+    return resp?.status === 409;
+  }
+  return false;
+}
+
 // --- Emails ---
 export const sendEmails = (rowIds: string[]) =>
   api
@@ -11,7 +46,6 @@ export const getJobStatus = (jobId: string) =>
   api
     .get<{
       job_id: string;
-      celery_task_id: string | null;
       status: string;
       total: number;
       sent: number;
@@ -154,8 +188,15 @@ export const scheduleEmails = (
     )
     .then((r) => r.data);
 
-export const getScheduledJobs = () =>
-  api.get<ScheduledJobsResponse>("/emails/scheduled-jobs").then((r) => r.data);
+export const getScheduledJobs = (opts?: { finishedLimit?: number }) =>
+  api
+    .get<ScheduledJobsResponse>("/emails/scheduled-jobs", {
+      params:
+        opts?.finishedLimit !== undefined
+          ? { finished_limit: opts.finishedLimit }
+          : undefined,
+    })
+    .then((r) => r.data);
 
 export const cancelScheduledJob = (jobId: string) =>
   api.delete(`/emails/scheduled-jobs/${jobId}`).then((r) => r.data);

@@ -8,6 +8,7 @@ import {
 import {
   getCampaigns,
   sendEmails,
+  extractApiError,
   scheduleEmails,
   getConsentStatus,
   bulkUpdateCampaigns,
@@ -324,8 +325,8 @@ export default function SendPage() {
       });
       deselectAll();
       toast.success(`Retrying ${targetIds.length} email(s)`);
-    } catch {
-      toast.error("Failed to retry emails");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to retry emails"));
     } finally {
       setRetrying(false);
     }
@@ -343,8 +344,8 @@ export default function SendPage() {
         errors: [],
       });
       toast.success("Send job started");
-    } catch {
-      toast.error("Failed to start send job");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to start send job"));
     }
   };
 

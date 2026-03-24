@@ -14,6 +14,7 @@ from app import config
 from app.database import init_db, get_db, SessionLocal
 from app.auth import require_auth, get_user_id
 from app.logging_config import setup_logging, get_logger
+from app.schemas.email_column import _utc_iso
 from app.models.template import Template
 from app.models.recruiter import Recruiter
 from app.models.email_column import EmailColumn
@@ -26,8 +27,10 @@ from app.models.audit_log import AuditLog  # noqa: F401 – register model
 from app.models.custom_column import CustomColumnDefinition  # noqa: F401 – register model
 from app.models.access_key import AccessKey  # noqa: F401 – register model
 from app.models.bounce_log import BounceLog  # noqa: F401 – register model
+from app.models.thread import EmailThread, ThreadMessage  # noqa: F401 – register model
 
 from app.routers import recruiters, referrals, campaigns, templates, emails, import_export, documents, settings, consent, sender_accounts, audit_logs, custom_columns
+from app.routers import threads as threads_router
 from app.routers import admin as admin_router
 from app.routers import bounces as bounces_router
 from app.routers import backup as backup_router
@@ -163,6 +166,7 @@ app.include_router(custom_columns.router, dependencies=[Depends(require_auth)])
 app.include_router(admin_router.router, dependencies=[Depends(require_auth)])
 app.include_router(bounces_router.router, dependencies=[Depends(require_auth)])
 app.include_router(backup_router.router, dependencies=[Depends(require_auth)])
+app.include_router(threads_router.router, dependencies=[Depends(require_auth)])
 # SSE endpoint uses query-param auth (EventSource can't set headers)
 app.include_router(bounces_router.sse_router)
 app.include_router(emails.sse_router)
@@ -269,6 +273,19 @@ def validate_access_key_endpoint(request: Request, body: _AccessKeyValidateBody)
         db.close()
 
 
+# --- SSE token endpoint ---
+from app.services.sse_token import create_sse_token as _create_sse_token
+
+@app.post("/api/auth/sse-token")
+def issue_sse_token(auth=Depends(require_auth), db: Session = Depends(get_db)):
+    """Issue a short-lived HMAC token for SSE EventSource connections."""
+    from app.auth import get_user_role, is_admin_role
+    uid = get_user_id(auth)
+    role = get_user_role(uid, db)
+    token = _create_sse_token(uid, is_admin_role(role))
+    return {"token": token}
+
+
 # --- Health check ---
 @app.get("/api/health")
 def health():
@@ -299,18 +316,17 @@ def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
         .all()
     )
     # Stale jobs that need attention
-    stale_rows = (
+    stale_jobs = (
         db.query(JobResult)
         .filter(JobResult.user_id == uid, JobResult.status == "stale")
-        .order_by(JobResult.created_at.desc())
-        .limit(10)
+        .order_by(JobResult.completed_at.desc())
         .all()
     )
     return {
         "total_recruiters": total_recruiters,
         "total_campaigns": total_campaigns,
         "by_status": {s: c for s, c in statuses},
-        "stale_job_count": len(stale_rows),
+        "stale_job_count": len(stale_jobs),
         "stale_jobs": [
             {
                 "job_id": jr.id,
@@ -319,11 +335,11 @@ def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
                 "total": jr.total,
                 "sent": jr.sent,
                 "failed": jr.failed,
-                "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-                "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
-                "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+                "created_at": _utc_iso(jr.created_at),
+                "scheduled_at": _utc_iso(jr.scheduled_at),
+                "completed_at": _utc_iso(jr.completed_at),
             }
-            for jr in stale_rows
+            for jr in stale_jobs
         ],
         "upcoming_jobs": [
             {
@@ -331,7 +347,7 @@ def dashboard(auth=Depends(require_auth), db: Session = Depends(get_db)):
                 "status": jr.status,
                 "total": jr.total,
                 "sent": jr.sent,
-                "created_at": jr.created_at.isoformat() if jr.created_at else None,
+                "created_at": _utc_iso(jr.created_at),
             }
             for jr in upcoming
         ],

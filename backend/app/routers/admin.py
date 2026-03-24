@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.auth import require_auth, get_user_id, get_user_role, is_admin_role, invalidate_role_cache
+from app.schemas.email_column import _utc_iso
 from app.models.access_key import AccessKey
 from app.models.user_role import UserRole
 from app.models.sender_account import SenderAccount
@@ -403,9 +404,9 @@ def admin_list_jobs(
             "failed": jr.failed,
             "user_id": jr.user_id,
             "user_email": user_email or jr.user_id,
-            "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-            "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
-            "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+            "created_at": _utc_iso(jr.created_at),
+            "scheduled_at": _utc_iso(jr.scheduled_at),
+            "completed_at": _utc_iso(jr.completed_at),
         })
 
     return {"jobs": jobs, "total": total, "page": page, "per_page": per_page}

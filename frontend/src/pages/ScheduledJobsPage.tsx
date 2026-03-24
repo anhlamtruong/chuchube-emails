@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getScheduledJobs, cancelScheduledJob, rerunJob } from "@/api/client";
+import {
+  getScheduledJobs,
+  cancelScheduledJob,
+  rerunJob,
+  extractApiError,
+} from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import type { ScheduledJob, FinishedJob } from "@/api/client";
 import { useJobSSE } from "@/hooks/useJobSSE";
@@ -101,7 +106,7 @@ export default function ScheduledJobsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getScheduledJobs();
+      const data = await getScheduledJobs({ finishedLimit: 0 });
       setJobs(data.jobs);
       setFinished(data.finished);
     } catch {
@@ -162,8 +167,8 @@ export default function ScheduledJobsPage() {
       const result = await rerunJob(jobId);
       toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
       navigate(`/scheduled-jobs/${result.job_id}`);
-    } catch {
-      toast.error("Failed to rerun job");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to rerun job"));
     } finally {
       setRerunningId(null);
     }
@@ -288,7 +293,9 @@ export default function ScheduledJobsPage() {
 
       {/* Status Filter Pills */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Filter:</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          Filter:
+        </span>
         {ALL_STATUSES.map((status) => {
           const count = [...jobs, ...finished].filter(
             (j) => j.status === status,
@@ -499,7 +506,8 @@ export default function ScheduledJobsPage() {
             Finished Jobs ({filteredFinished.length}
             {filteredFinished.length !== finished.length
               ? ` of ${finished.length}`
-              : ""})
+              : ""}
+            )
           </button>
           {showFinished && filteredFinished.length === 0 ? (
             <Card>
@@ -507,135 +515,140 @@ export default function ScheduledJobsPage() {
                 No finished jobs match the current filter.
               </CardContent>
             </Card>
-          ) : showFinished && (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-5" />
-                      <TableHead>Name</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Progress</TableHead>
-                      <TableHead>Completed</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredFinished.map((job) => {
-                      const pct =
-                        job.total > 0
-                          ? ((job.sent + job.failed) / job.total) * 100
-                          : 0;
-                      const canRerun =
-                        job.status === "stale" ||
-                        job.status === "error" ||
-                        (job.status === "completed" && job.failed > 0);
-                      const canDismiss =
-                        job.status === "error" || job.status === "stale";
-                      return (
-                        <TableRow
-                          key={job.job_id}
-                          className={`cursor-pointer hover:bg-muted/50 ${
-                            job.status === "stale"
-                              ? "bg-orange-50/50 dark:bg-orange-950/10"
-                              : ""
-                          }`}
-                          onClick={() =>
-                            navigate(`/scheduled-jobs/${job.job_id}`)
-                          }
-                        >
-                          <TableCell>
-                            <StatusDot status={job.status} />
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {job.name}
-                            <span className="block text-xs text-muted-foreground font-mono">
-                              {job.job_id.slice(0, 8)}…
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={statusVariant(job.status)}
-                              className="capitalize"
-                            >
-                              {job.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="min-w-40">
-                            <div className="flex items-center gap-2">
-                              <Progress value={pct} className="h-1.5 flex-1" />
-                              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                <span className="text-green-600 font-medium">
-                                  {job.sent}
-                                </span>
-                                /
-                                <span className="text-destructive font-medium">
-                                  {job.failed}
-                                </span>
-                                /{job.total}
+          ) : (
+            showFinished && (
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-5" />
+                        <TableHead>Name</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Progress</TableHead>
+                        <TableHead>Completed</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredFinished.map((job) => {
+                        const pct =
+                          job.total > 0
+                            ? ((job.sent + job.failed) / job.total) * 100
+                            : 0;
+                        const canRerun =
+                          job.status === "stale" ||
+                          job.status === "error" ||
+                          (job.status === "completed" && job.failed > 0);
+                        const canDismiss =
+                          job.status === "error" || job.status === "stale";
+                        return (
+                          <TableRow
+                            key={job.job_id}
+                            className={`cursor-pointer hover:bg-muted/50 ${
+                              job.status === "stale"
+                                ? "bg-orange-50/50 dark:bg-orange-950/10"
+                                : ""
+                            }`}
+                            onClick={() =>
+                              navigate(`/scheduled-jobs/${job.job_id}`)
+                            }
+                          >
+                            <TableCell>
+                              <StatusDot status={job.status} />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {job.name}
+                              <span className="block text-xs text-muted-foreground font-mono">
+                                {job.job_id.slice(0, 8)}…
                               </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {job.completed_at
-                              ? new Date(job.completed_at).toLocaleString()
-                              : "—"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div
-                              className="flex items-center justify-end gap-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {canRerun && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 gap-1.5 text-xs"
-                                  disabled={rerunningId === job.job_id}
-                                  onClick={() => handleRerun(job.job_id)}
-                                >
-                                  <RotateCcw
-                                    size={12}
-                                    className={
-                                      rerunningId === job.job_id
-                                        ? "animate-spin"
-                                        : ""
-                                    }
-                                  />
-                                  Rerun
-                                </Button>
-                              )}
-                              {canDismiss && (
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={statusVariant(job.status)}
+                                className="capitalize"
+                              >
+                                {job.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="min-w-40">
+                              <div className="flex items-center gap-2">
+                                <Progress
+                                  value={pct}
+                                  className="h-1.5 flex-1"
+                                />
+                                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                  <span className="text-green-600 font-medium">
+                                    {job.sent}
+                                  </span>
+                                  /
+                                  <span className="text-destructive font-medium">
+                                    {job.failed}
+                                  </span>
+                                  /{job.total}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {job.completed_at
+                                ? new Date(job.completed_at).toLocaleString()
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div
+                                className="flex items-center justify-end gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {canRerun && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 gap-1.5 text-xs"
+                                    disabled={rerunningId === job.job_id}
+                                    onClick={() => handleRerun(job.job_id)}
+                                  >
+                                    <RotateCcw
+                                      size={12}
+                                      className={
+                                        rerunningId === job.job_id
+                                          ? "animate-spin"
+                                          : ""
+                                      }
+                                    />
+                                    Rerun
+                                  </Button>
+                                )}
+                                {canDismiss && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
+                                    onClick={() => setCancelTarget(job.job_id)}
+                                  >
+                                    <Trash2 size={12} />
+                                    Dismiss
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
-                                  size="sm"
-                                  className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
-                                  onClick={() => setCancelTarget(job.job_id)}
+                                  size="icon"
+                                  onClick={() =>
+                                    navigate(`/scheduled-jobs/${job.job_id}`)
+                                  }
+                                  title="View details"
                                 >
-                                  <Trash2 size={12} />
-                                  Dismiss
+                                  <ArrowUpRight size={15} />
                                 </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() =>
-                                  navigate(`/scheduled-jobs/${job.job_id}`)
-                                }
-                                title="View details"
-                              >
-                                <ArrowUpRight size={15} />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )
           )}
         </div>
       )}

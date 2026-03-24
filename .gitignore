@@ -7,3 +7,7 @@ backups/
 *.dump
 *.dump.gpg
 exports/
+
+# Node build artifacts
+node_modules/
+dist/

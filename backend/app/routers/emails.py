@@ -3,7 +3,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -13,7 +13,7 @@ from app.models.job_result import JobResult
 from app.models.user_profile import UserProfile
 from app.models.recruiter import Recruiter
 from app.models.referral import Referral
-from app.schemas.email_column import SendEmailsRequest, ScheduleEmailsRequest
+from app.schemas.email_column import SendEmailsRequest, ScheduleEmailsRequest, _utc_iso
 from app.logging_config import get_logger
 from app import config
 from app.auth import require_auth, get_user_id, get_user_role, is_admin_role, verify_clerk_token
@@ -52,13 +52,12 @@ def _upsert_user_profile(auth: dict, db: Session) -> None:
 def send_emails(
     req: SendEmailsRequest,
     request: Request,
-    background_tasks: BackgroundTasks,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
     _consent=Depends(require_consent),
 ):
-    """Queue a batch email send via BackgroundTasks."""
-    from app.background import send_email_batch
+    """Queue a batch email send via the shared executor."""
+    from app.background import dispatch_job, check_row_overlap
     uid = get_user_id(auth)
     _upsert_user_profile(auth, db)
 
@@ -73,12 +72,21 @@ def send_emails(
     if len(owned_ids) != len(req.row_ids):
         raise HTTPException(403, "Some row_ids do not belong to you")
 
-    jr = JobResult(status="queued", total=len(req.row_ids), row_ids=[str(rid) for rid in req.row_ids], user_id=uid)
+    # Check for overlapping rows in active jobs
+    str_row_ids = [str(rid) for rid in req.row_ids]
+    conflicting = check_row_overlap(str_row_ids)
+    if conflicting:
+        raise HTTPException(
+            409,
+            f"Some rows are already being processed by job {conflicting}",
+        )
+
+    jr = JobResult(status="queued", total=len(req.row_ids), row_ids=str_row_ids, user_id=uid)
     db.add(jr)
     db.commit()
     db.refresh(jr)
 
-    background_tasks.add_task(send_email_batch, jr.id, req.row_ids)
+    dispatch_job(jr.id, str_row_ids)
     return {"job_id": jr.id, "status": "queued"}
 
 
@@ -96,8 +104,8 @@ def get_job_status(job_id: str, auth: dict = Depends(require_auth), db: Session 
         "sent": jr.sent,
         "failed": jr.failed,
         "errors": jr.errors or [],
-        "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-        "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+        "created_at": _utc_iso(jr.created_at),
+        "completed_at": _utc_iso(jr.completed_at),
     }
 
 
@@ -123,8 +131,8 @@ def list_jobs(
                 "sent": jr.sent,
                 "failed": jr.failed,
                 "errors": jr.errors or [],
-                "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-                "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+                "created_at": _utc_iso(jr.created_at),
+                "completed_at": _utc_iso(jr.completed_at),
             }
             for jr in results
         ]
@@ -190,6 +198,13 @@ def schedule_one_time(
     if len(owned) != len(req.row_ids):
         raise HTTPException(403, "Some row_ids do not belong to you")
 
+    # M4 fix: check for overlapping active jobs before scheduling
+    from app.background import check_row_overlap
+    str_row_ids = [str(rid) for rid in req.row_ids]
+    conflicting = check_row_overlap(str_row_ids)
+    if conflicting:
+        raise HTTPException(409, f"Rows overlap with active job {conflicting}")
+
     # Convert local time → UTC
     try:
         tz = ZoneInfo(req.timezone)
@@ -211,11 +226,15 @@ def schedule_one_time(
     db.refresh(jr)
 
     # The background poller will pick these up when scheduled_at <= now(UTC)
-    return {"job_id": jr.id, "status": "scheduled", "run_at": utc_dt.isoformat() + "Z"}
+    return {"job_id": jr.id, "status": "scheduled", "run_at": _utc_iso(utc_dt)}
 
 
 @router.get("/scheduled-jobs")
-def get_scheduled_jobs(auth: dict = Depends(require_auth), db: Session = Depends(get_db)):
+def get_scheduled_jobs(
+    finished_limit: int = Query(20, ge=0, description="Max finished jobs to return. 0 = all."),
+    auth: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
     """List active + finished jobs from the job_results table."""
     uid = get_user_id(auth)
     active = (
@@ -224,13 +243,14 @@ def get_scheduled_jobs(auth: dict = Depends(require_auth), db: Session = Depends
         .order_by(JobResult.created_at.desc())
         .all()
     )
-    done = (
+    done_q = (
         db.query(JobResult)
         .filter(JobResult.user_id == uid, JobResult.status.in_(["completed", "error", "cancelled", "stale"]))
         .order_by(JobResult.completed_at.desc())
-        .limit(20)
-        .all()
     )
+    if finished_limit > 0:
+        done_q = done_q.limit(finished_limit)
+    done = done_q.all()
 
     def _fmt(jr, include_completed_at=False):
         d = {
@@ -240,11 +260,11 @@ def get_scheduled_jobs(auth: dict = Depends(require_auth), db: Session = Depends
             "total": jr.total,
             "sent": jr.sent,
             "failed": jr.failed,
-            "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-            "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
+            "created_at": _utc_iso(jr.created_at),
+            "scheduled_at": _utc_iso(jr.scheduled_at),
         }
         if include_completed_at:
-            d["completed_at"] = (jr.completed_at.isoformat() + "Z") if jr.completed_at else None
+            d["completed_at"] = _utc_iso(jr.completed_at)
         return d
 
     return {
@@ -260,7 +280,7 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
     jr = db.query(JobResult).get(job_id)
     if not jr or jr.user_id != uid:
         raise HTTPException(404, "Job not found")
-    if jr.status not in ("queued", "scheduled", "error", "stale"):
+    if jr.status not in ("queued", "scheduled", "stale", "error"):
         raise HTTPException(400, f"Cannot cancel job in '{jr.status}' status")
 
     # Clear scheduled_at only on rows belonging to THIS job
@@ -278,8 +298,6 @@ def cancel_scheduled_job(job_id: str, auth: dict = Depends(require_auth), db: Se
             row.scheduled_at = None
 
     jr.status = "cancelled"
-    if not jr.completed_at:
-        jr.completed_at = datetime.now(tz=timezone.utc)
     db.commit()
     return {"job_id": jr.id, "status": "cancelled"}
 
@@ -296,7 +314,6 @@ from app.schemas.requests import RescheduleJobRequest
 def rerun_job(
     job_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
@@ -305,7 +322,7 @@ def rerun_job(
     Only rows that are 'pending' or 'failed' are included in the new job.
     Already-sent rows are skipped. The new job dispatches immediately.
     """
-    from app.background import send_email_batch
+    from app.background import dispatch_job, check_row_overlap
     uid = get_user_id(auth)
     _upsert_user_profile(auth, db)
 
@@ -343,6 +360,14 @@ def rerun_job(
 
     row_ids = [str(r.id) for r in retryable_rows]
 
+    # Check for overlapping rows in active jobs
+    conflicting = check_row_overlap(row_ids)
+    if conflicting:
+        raise HTTPException(
+            409,
+            f"Some rows are already being processed by job {conflicting}",
+        )
+
     # Create new job linked to the parent
     new_jr = JobResult(
         status="queued",
@@ -355,7 +380,7 @@ def rerun_job(
     db.commit()
     db.refresh(new_jr)
 
-    background_tasks.add_task(send_email_batch, new_jr.id, row_ids)
+    dispatch_job(new_jr.id, row_ids)
     return {
         "job_id": new_jr.id,
         "status": "queued",
@@ -416,6 +441,13 @@ def reschedule_job(
     if not retryable_rows:
         raise HTTPException(400, "No retryable rows found (all already sent)")
 
+    # M4 fix: check for overlapping active jobs before rescheduling
+    from app.background import check_row_overlap
+    retry_row_ids = [str(r.id) for r in retryable_rows]
+    conflicting = check_row_overlap(retry_row_ids, exclude_job_id=job_id)
+    if conflicting:
+        raise HTTPException(409, f"Rows overlap with active job {conflicting}")
+
     # Reset rows and set scheduled_at
     for row in retryable_rows:
         row.sent_status = "pending"
@@ -439,7 +471,7 @@ def reschedule_job(
     return {
         "job_id": new_jr.id,
         "status": "scheduled",
-        "run_at": utc_dt.isoformat() + "Z",
+        "run_at": _utc_iso(utc_dt),
         "total": len(row_ids),
         "parent_job_id": jr.id,
     }
@@ -454,7 +486,6 @@ def reschedule_job(
 def clone_job(
     job_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     auth: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
@@ -464,7 +495,7 @@ def clone_job(
     brand-new EmailColumn rows — leaving the originals untouched — and dispatches
     a new job to send the entire batch again.
     """
-    from app.background import send_email_batch
+    from app.background import dispatch_job
     uid = get_user_id(auth)
     _upsert_user_profile(auth, db)
 
@@ -531,7 +562,7 @@ def clone_job(
     db.commit()
     db.refresh(new_jr)
 
-    background_tasks.add_task(send_email_batch, new_jr.id, new_row_ids)
+    dispatch_job(new_jr.id, new_row_ids)
     return {
         "job_id": new_jr.id,
         "status": "queued",
@@ -584,7 +615,7 @@ def get_job_detail(job_id: str, auth: dict = Depends(require_auth), db: Session 
                     "sender_email": r.sender_email or "",
                     "template_file": r.template_file or "",
                     "sent_status": r.sent_status or "pending",
-                    "sent_at": (r.sent_at.isoformat() + "Z") if r.sent_at else None,
+                    "sent_at": _utc_iso(r.sent_at),
                 })
 
     return {
@@ -594,9 +625,9 @@ def get_job_detail(job_id: str, auth: dict = Depends(require_auth), db: Session 
         "sent": jr.sent,
         "failed": jr.failed,
         "errors": jr.errors or [],
-        "created_at": (jr.created_at.isoformat() + "Z") if jr.created_at else None,
-        "scheduled_at": (jr.scheduled_at.isoformat() + "Z") if jr.scheduled_at else None,
-        "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+        "created_at": _utc_iso(jr.created_at),
+        "scheduled_at": _utc_iso(jr.scheduled_at),
+        "completed_at": _utc_iso(jr.completed_at),
         "parent_job_id": jr.parent_job_id,
         "emails": emails,
         "owner_email": owner_email,
@@ -640,7 +671,7 @@ def ooo_resendable(auth: dict = Depends(require_auth), db: Session = Depends(get
                 "company": ec.company or contact.company,
                 "sender_email": ec.sender_email,
                 "template_file": ec.template_file,
-                "sent_at": ec.sent_at.isoformat() + "Z" if ec.sent_at else None,
+                "sent_at": _utc_iso(ec.sent_at),
                 "ooo_return_date": contact.ooo_return_date.isoformat() if contact.ooo_return_date else None,
                 "contact_type": "recruiter" if fk_field == "recruiter_id" else "referral",
                 "contact_id": str(contact.id),
@@ -692,7 +723,7 @@ async def job_stream(request: Request, job_id: str, token: str = Query(...)):
                 "data": json.dumps({
                     "job_id": job_id, "status": jr.status,
                     "sent": jr.sent, "failed": jr.failed, "total": jr.total,
-                    "completed_at": (jr.completed_at.isoformat() + "Z") if jr.completed_at else None,
+                    "completed_at": _utc_iso(jr.completed_at),
                 }),
             }
         return EventSourceResponse(done_gen())

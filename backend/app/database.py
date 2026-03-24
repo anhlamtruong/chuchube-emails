@@ -24,8 +24,9 @@ engine = create_engine(
     connect_args=_connect_args,
     pool_pre_ping=True,       # test connections before checkout (fixes Supabase idle drops)
     pool_recycle=270,          # recycle connections every 4.5 min (Supabase drops idle after ~5 min)
-    pool_size=5,               # baseline connection pool size
-    max_overflow=10,           # allow up to 15 total connections under load
+    pool_size=6,               # baseline connection pool size (supports concurrent jobs)
+    max_overflow=8,            # allow up to 14 total connections under load (free-tier safe)
+    pool_timeout=10,           # seconds to wait for a connection before raising
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

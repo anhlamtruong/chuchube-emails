@@ -46,7 +46,7 @@ mkdir -p "$BACKUP_DIR"
 
 # ─── Check for active jobs (defer if sends are running) ───────────────────
 ACTIVE_JOBS=$(psql "$BACKUP_DATABASE_URL" -t -A -c \
-    "SELECT count(*) FROM job_results WHERE status IN ('queued','sending');" 2>/dev/null || echo "0")
+    "SELECT count(*) FROM job_results WHERE status IN ('queued','running','scheduled');" 2>/dev/null || echo "0")
 
 RETRY_COUNT=0
 MAX_RETRIES=4
@@ -56,7 +56,7 @@ while [ "$ACTIVE_JOBS" -gt 0 ] && [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
     log "WARN: $ACTIVE_JOBS active job(s) detected. Deferring backup by ${RETRY_DELAY}s (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
     sleep "$RETRY_DELAY"
     ACTIVE_JOBS=$(psql "$BACKUP_DATABASE_URL" -t -A -c \
-        "SELECT count(*) FROM job_results WHERE status IN ('queued','sending');" 2>/dev/null || echo "0")
+        "SELECT count(*) FROM job_results WHERE status IN ('queued','running','scheduled');" 2>/dev/null || echo "0")
     RETRY_COUNT=$((RETRY_COUNT + 1))
 done
 

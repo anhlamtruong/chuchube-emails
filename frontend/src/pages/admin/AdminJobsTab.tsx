@@ -162,6 +162,7 @@ export default function AdminJobsTab() {
             <option value="queued">Queued</option>
             <option value="scheduled">Scheduled</option>
             <option value="running">Running</option>
+            <option value="stale">Stale</option>
             <option value="completed">Completed</option>
             <option value="error">Error</option>
             <option value="cancelled">Cancelled</option>

@@ -3,9 +3,15 @@ from pydantic import BaseModel, EmailStr, Field, model_serializer
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
-    """Serialize a naive-UTC datetime with a trailing Z."""
+    """Serialize a datetime as an ISO 8601 string with trailing Z.
+
+    Handles both naive (assumed UTC) and timezone-aware datetimes.
+    """
     if dt is None:
         return None
+    # If tz-aware, convert to UTC and strip tzinfo to avoid "+00:00Z"
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(tz.utc).replace(tzinfo=None)
     return dt.isoformat() + "Z"
 
 

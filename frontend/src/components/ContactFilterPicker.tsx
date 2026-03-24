@@ -1,4 +1,10 @@
-import { useEffect, useState, useCallback, type MouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  type MouseEvent,
+} from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { Contact } from "@/api/contacts";
 import type { Paginated } from "@/api/client";
@@ -22,9 +28,14 @@ import {
   TableCell,
 } from "@/components/ui/table";
 
+const PAGE_SIZE = 500;
+
 interface Props<T extends Contact> {
   /** Function that fetches paginated contact data */
-  fetchFn: (params?: Record<string, string | number>) => Promise<Paginated<T>>;
+  fetchFn: (
+    params?: Record<string, string | number>,
+    signal?: AbortSignal,
+  ) => Promise<Paginated<T>>;
   /** Label shown in empty state, e.g. "recruiters" or "referrals" */
   entityLabel: string;
   onSelectionChange: (ids: string[], items: T[]) => void;
@@ -51,6 +62,8 @@ export default function ContactFilterPicker<T extends Contact>({
   const [location, setLocation] = useState("");
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
 
   // Debounce filter values to avoid API calls on every keystroke
   const debouncedSearch = useDebounce(search, 300);
@@ -59,20 +72,50 @@ export default function ContactFilterPicker<T extends Contact>({
   const debouncedTitle = useDebounce(title, 300);
 
   const load = useCallback(async () => {
+    // Cancel any in-flight request from a previous filter change
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
+    setLoadProgress("");
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string> = { per_page: String(PAGE_SIZE) };
       if (debouncedSearch) params.search = debouncedSearch;
       if (debouncedCompany) params.company = debouncedCompany;
       if (debouncedLocation) params.location = debouncedLocation;
       if (debouncedTitle) params.title = debouncedTitle;
-      params.per_page = "500";
-      const data = await fetchFn(params);
-      setItems(data.items);
-    } catch {
+
+      // First page — learn the total count
+      const first = await fetchFn({ ...params, page: 1 }, controller.signal);
+      let all = first.items;
+      const { total } = first;
+
+      if (total > PAGE_SIZE) {
+        const pages = Math.ceil(total / PAGE_SIZE);
+        setLoadProgress(`Loading ${all.length} of ${total}…`);
+
+        // Fetch remaining pages in parallel
+        const remaining = Array.from({ length: pages - 1 }, (_, i) =>
+          fetchFn({ ...params, page: i + 2 }, controller.signal),
+        );
+        const results = await Promise.all(remaining);
+        for (const r of results) {
+          all = all.concat(r.items);
+        }
+      }
+
+      if (!controller.signal.aborted) {
+        setItems(all);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       /* silently fail — filter picker stays empty */
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        setLoadProgress("");
+      }
     }
   }, [
     debouncedSearch,
@@ -84,6 +127,7 @@ export default function ContactFilterPicker<T extends Contact>({
 
   useEffect(() => {
     load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   // Notify parent whenever selection changes
@@ -204,7 +248,7 @@ export default function ContactFilterPicker<T extends Contact>({
                   colSpan={7}
                   className="text-center text-muted-foreground"
                 >
-                  Loading…
+                  {loadProgress || "Loading…"}
                 </TableCell>
               </TableRow>
             ) : items.length === 0 ? (

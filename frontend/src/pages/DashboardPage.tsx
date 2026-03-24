@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { getDashboard, rerunJob, cancelScheduledJob } from "@/api/client";
+import {
+  getDashboard,
+  rerunJob,
+  cancelScheduledJob,
+  extractApiError,
+} from "@/api/client";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useJobSSE } from "@/hooks/useJobSSE";
 import type { JobUpdateEvent } from "@/hooks/useJobSSE";
@@ -102,8 +107,8 @@ export default function DashboardPage() {
       const result = await rerunJob(jobId);
       toast.success(`Rerun started — new job ${result.job_id.slice(0, 8)}…`);
       navigate(`/scheduled-jobs/${result.job_id}`);
-    } catch {
-      toast.error("Failed to rerun job");
+    } catch (err) {
+      toast.error(extractApiError(err, "Failed to rerun job"));
     } finally {
       setRerunningId(null);
     }
@@ -299,11 +304,14 @@ export default function DashboardPage() {
                           {job.name}
                         </p>
                         <p className="text-xs text-orange-600 dark:text-orange-400">
-                          {job.scheduled_at
-                            ? new Date(job.scheduled_at).toLocaleString()
-                            : job.created_at
-                              ? new Date(job.created_at).toLocaleString()
-                              : "—"}
+                          {(() => {
+                            const raw = job.scheduled_at || job.created_at;
+                            if (!raw) return "—";
+                            const d = new Date(raw);
+                            return Number.isNaN(d.getTime())
+                              ? raw
+                              : d.toLocaleString();
+                          })()}
                           <span className="ml-2">
                             {job.sent}/{job.total} sent
                           </span>
@@ -320,7 +328,9 @@ export default function DashboardPage() {
                       >
                         <RotateCcw
                           size={12}
-                          className={rerunningId === job.job_id ? "animate-spin" : ""}
+                          className={
+                            rerunningId === job.job_id ? "animate-spin" : ""
+                          }
                         />
                         Rerun
                       </Button>
